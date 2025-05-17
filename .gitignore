@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+.env
+# Build output
+dist/
+
+# Runtime data / logs / temp (if applicable)
+# data/
+# output/
+# temp/
+# *.log
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db 

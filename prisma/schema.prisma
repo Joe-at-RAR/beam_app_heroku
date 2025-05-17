@@ -1,0 +1,1015 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("PRISMA_URL")
+  directUrl = env("DIRECT_URL")   
+}
+
+generator client {
+  provider   = "prisma-client-js"
+  engineType = "binary"
+}
+
+// DEFINITIONS:
+// ClientSafe: Can be seen by the user logged in without issue
+// SharedSafe: Can be seen by OTHER logged in users without issue - e.g. shared custom documents
+
+// User: NOT fully ClientSafe
+model User {
+  id           String        @id @unique 
+  email        String        @unique // ClientSafe
+  firstName    String        @default("First Name") // ClientSafe
+  lastName     String        @default("Last Name") // ClientSafe
+  phoneNumber  String?       // ClientSafe
+  role         Role          @default(USER) // ClientSafe
+  occupation    String? @default("Medical Practitioner") // ClientSafe
+  specialty     String? @default("General Practitioner") // ClientSafe
+
+  deletedUser  Boolean       @default(false) // NOT ClientSafe
+  createdAt    DateTime      @default(now()) @db.Timestamp(6) // NOT ClientSafe
+  updatedAt    DateTime      @updatedAt @db.Timestamp(6) // NOT ClientSafe
+  
+  sessions Session[] // NOT ClientSafe
+  oauthAccounts OauthAccount[] // NOT ClientSafe
+  passwords  Password[] // NOT ClientSafe
+  authKeys     AuthKey[] // NOT ClientSafe
+  verified     Boolean       @default(false) // NOT ClientSafe
+  receiveEmail Boolean       @default(true) // NOT ClientSafe
+  token        String?       @unique // NOT ClientSafe - // WORK - This can be improved to rotate more often most likely
+  verifiedSafeUse Boolean @default(true) // NOT ClientSafe
+  mobileVerified Boolean @default(false) // NOT ClientSafe
+  smsVerifications SMSVerification[] // NOT ClientSafe
+
+  trainingLevel String? @default("consultant") // ClientSafe - but not used
+  ahpraNumber   String? // NOT ClientSafe - but not used
+  ahpraHash     String? @default(cuid()) // NOT ClientSafe - but not used
+  ahpraVerified Boolean @default(false) // NOT ClientSafe - but not used
+
+  extendedTrial        DateTime @default(dbgenerated("TIMESTAMP '2024-06-1 08:00:00'")) // NOT ClientSafe
+  claimedExtendedTrial Boolean  @default(false) // NOT ClientSafe
+
+  lastActive DateTime @default(now()) // ClientSafe
+  practiceName String? // ClientSafe 
+  practicePostcode String? // ClienSafe
+
+  customDocuments                   CustomDocument[] // ClientSafe
+  activePublicCustomDocumentUuids   String[] // ClientSafe
+  archivedPublicCustomDocumentUuids String[] // ClientSafe
+  createdDocuments       CreatedDocument[]  // Relation to CreatedDocument
+
+  consultSessions       ConsultSession[] // ClientSafe
+  deletedConsultSession DeletedConsultSession[] // NOT ClientSafe
+  
+  PatientInfo            PatientInfo[] // ClientSafe
+  UserDevelopmentOptions UserDevelopmentOptions? // ClientSafe
+
+  userOptions        UserOptions? // Refer to model for individual fields
+  dismissedBanner     Boolean @default(true) //  ClientSafe
+  country        String @default("Australia") //  ClientSafe
+  languageAudio  String @default("en") //  ClientSafe
+languageAudioAzure         String   @default("[\\\"en-AU\\\"]") // Default to stringified JSON array for ['en-AU']
+  languageOutput String @default("en") //  ClientSafe
+
+  stripeCustomerId String? //  ClientSafe
+  subscription     Subscription?  //  ClientSafe
+  subscriptionId   String?  //  ClientSafe
+
+  organisationUser           OrganisationUser?
+  organisationUserId         Int?  //  ClientSafe
+  organisationRequestedEntry Boolean  @default(false) // This will be set to true when a user requests to join any organisation id. It remains true for 1 week to prevent exposing // NOT ClientSafe
+  organisationJoinRequests   OrganisationJoinRequest[] // NOT ClientSafe
+
+  tokenUsages TokenUsage[] // NOT ClientSafe
+  actions     ActionLog[] // NOT ClientSafe
+  rateLimits  RateLimit[] // NOT ClientSafe
+
+  referrals      Referral[]    @relation("ReferralsMade") // ClientSafe
+  referredByUserId     String? // NOT ClientSafe
+  Organisation   Organisation? @relation(fields: [organisationId], references: [id]) // NOT ClientSafe
+  organisationId Int? // NOT ClientSafe
+
+  stringReplacementsForTextEditor   StringReplacement[]    @relation("ReplacementUserRelation") // ClientSafe
+
+  votes Vote[] // For custom document voting // NOT ClientSafe
+
+  jobs  Job[] // NOT ClientSafe
+  files File[] // NOT ClientSafe
+  validationLogs    RequestValidationLog[] // NOT ClientSafe
+
+  // Direct link from User to the Patient Filesets they own
+  patientFilesets     SilknotePatientFileset[]
+  
+  silknoteUserUuid String?      
+  
+  @@map("auth_user")
+  @@index([silknoteUserUuid])
+}
+
+// RequestValidationLog: NOT ClientSafe
+model RequestValidationLog {
+  id            String   @id @default(cuid())
+  timestamp     DateTime @default(now())
+  endpoint      String
+  ipAddress     String
+  userId        String?
+  user          User?    @relation(fields: [userId], references: [id])
+  
+  // Full request details (encrypted if userId exists)
+  requestBody   String?  /// @encrypted
+  requestHeaders String? 
+  
+  // Masked version (always plain text)
+  maskedRequestBody    String?
+  maskedRequestHeaders String?
+  
+  isValid       Boolean
+  errorMessage  String? /// @encrypted
+  
+  @@index([endpoint, timestamp])
+  @@index([ipAddress])
+  @@map("request_validation_logs")
+}
+
+// Password: NOT ClientSafe
+model Password {
+    id             Int    @id @default(autoincrement())
+    hashedPassword String
+    userId         String @unique
+    user           User   @relation(references: [id], fields: [userId], onDelete: Cascade)
+}
+
+// Session: NOT ClientSafe
+model Session {
+    id        String   @id
+    userId    String
+    expiresAt DateTime
+    user      User     @relation(references: [id], fields: [userId], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("auth_session")
+}
+
+// OauthAccount: NOT ClientSafe
+model OauthAccount {
+    providerId     String
+    providerUserId String
+    userId         String
+    user           User   @relation(references: [id], fields: [userId], onDelete: Cascade)
+
+    @@id([providerId, providerUserId])
+}
+
+// AuthKey: NOT ClientSafe
+model AuthKey {
+  id              String   @id @unique
+  hashed_password String?
+  user_id         String
+  authUser        User @relation(fields: [user_id], references: [id])
+
+  @@index([user_id])
+  @@map("auth_key")
+}
+
+// ConsultSession: NOT fully ClientSafe
+model ConsultSession {
+  consultId                      Int          @id @default(autoincrement()) // ClientSafe
+  consultUuid                    String?      @unique @default(uuid()) // ClientSafe
+  sessionToken                   String       @default(uuid()) 
+  consultDate                    DateTime     @default(now()) // ClientSafe
+  patientInfoId                  Int? // ClientSafe
+  patientInfo                    PatientInfo? @relation(fields: [patientInfoId], references: [patient_id]) // ClientSafe
+  authUserId                     String // ClientSafe
+  authUser                       User     @relation(fields: [authUserId], references: [id]) // NOT fully ClientSafe
+  lengthOfConsultSec             Int          @default(0) // ClientSafe
+  numTranscriptBlocksWithLowChar Int          @default(0) 
+
+  inProgress  Boolean @default(false) // ClientSafe
+
+  primaryIssue                    String? /// @encrypted // ClientSafe
+  bodySystem                    String? // ClientSafe
+  paediatricPatient             Boolean @default(false) // ClientSafe
+
+  carePlanData String @default("") /// @encrypted // ClientSafe
+
+  unusedConsultSession Boolean @default(true)
+  userDeleted          Boolean @default(false)
+  sentToStripe         Boolean @default(false)
+
+  isDictation  Boolean @default(false) // ClientSafe
+  isTelehealth Boolean @default(false) // ClientSafe
+  isLoudspeaker Boolean @default(false) // ClientSafe
+
+  submittedForProcessing DateTime? // ClientSafe
+  usedForConsultType     String? /// @encrypted // Should be cleared when user asks. // ClientSafe
+  usedForConsultMethod   String? /// @encrypted // ClientSafe
+  additionalFlags        String? /// @encrypted // can be used to store arbitrary flags e.g. P = Paeds consult // ClientSafe
+
+  transcripts             String  @default("[]") // ClientSafe
+  additionalNotes         String  @default("[]") // ClientSafe
+  completeTranscript      String? /// @encrypted // Should be cleared when user asks. // ClientSafe
+  completeAdditionalNotes String? /// @encrypted // Should be cleared when user asks. // ClientSafe
+
+  primaryNoteOut String? /// @encrypted // Should be cleared when user asks. // ClientSafe
+  dictationNote  String? /// @encrypted // Should be cleared when user asks. // ClientSafe
+
+  specialistLetter        String? /// @encrypted  // Should be cleared when user asks. // ClientSafe
+  patientLetter           String? /// @encrypted  // Should be cleared when user asks. // ClientSafe
+  medicalCertificate      String? /// @encrypted // Should be cleared when user asks. // ClientSafe
+  mentalHealthNoteOut     String? /// @encrypted // Should be cleared when user asks. // ClientSafe
+  temporaryNote           String? /// @encrypted // Should be cleared when user asks. // ClientSafe
+  mentalHealthCarePlanOut String? /// @encrypted // Should be cleared when user asks. // ClientSafe
+  customDocumentOutput    String? /// @encrypted
+
+  mdtNote String? /// @encrypted  // Should be cleared when user asks.
+
+  createdDayMonthYearString   String? // ClientSafe
+  numberOfLLMSubmissionsTotal Int     @default(0) // ClientSafe
+
+  transcriptBlocks TranscriptBlock[] // ClientSafe
+  languageAudio String?
+  languageOutput String?
+
+  outputDocuments OutputDocument[] // ClientSafe
+  createdDocuments CreatedDocument[] @relation("CreatedDocument")
+
+
+  editCount Int      @default(0) // ClientSafe
+
+  customDocuments CustomDocument[] // ClientSafe
+
+  stateSnapshot String? /// @encrypted // ClientSafe The most recent snapshot of the shared state - as this contains patient data it must be stringified.
+
+}
+
+model CreatedDocument {
+  uuid   String @id @unique @default(uuid())  // ClientSafe
+  createdAt                 DateTime       @default(now())  // ClientSafe
+  updatedAt                 DateTime       @updatedAt  // ClientSafe
+  
+  // Basic Document Info
+  type                      String?        // e.g., 'primaryNoteOut', 'letterToSpecialist'  // ClientSafe
+  title                     String?  // ClientSafe
+  version                   Int            @default(1)  // ClientSafe
+  
+  // Main Content
+  stringifiedOutputData     String?        /// @encrypted // Structured data output  // ClientSafe
+  stringOutput             String?        /// @encrypted // Final text output  // ClientSafe
+  stringifiedSchemaUsed    String?        /// @encrypted // Schema used for generation  // ClientSafe
+  
+  // Arrays stored as encrypted JSON strings
+  stringifiedSuggestedIssues    String?   /// @encrypted // JSON string of suggested issues array  // ClientSafe
+  stringifiedExcludedIssues     String?   /// @encrypted // JSON string of excluded issues array  // ClientSafe
+  stringifiedReferralIssues     String?   /// @encrypted // JSON string of referral issues array  // ClientSafe
+  stringifiedTags               String?   /// @encrypted // JSON string of tags array  // ClientSafe 
+  stringifiedSharedWith         String?   /// @encrypted // JSON string of shared with array  // ClientSafe
+  
+  
+  // Custom Document Integration
+  stringifiedCustomDocuments    String?   /// @encrypted // JSON array of ICustomDocumentOutputs
+  customDocumentUuid           String?    // Reference to specific custom document  // ClientSafe
+  customDocumentTitle          String?    // Title of custom document
+  customDocumentOutput         String?    /// @encrypted // Output for custom document
+  
+  // Document State
+  isError                  Boolean        @default(false)  // ClientSafe
+  errorMessage            String?        /// @encrypted  // ClientSafe
+  
+  // Display Settings
+  isPDFDocument           Boolean        @default(false)  // ClientSafe
+  pdfUrl                  String?        // URL if stored as PDF // NOT ClientSafe
+  
+  // Document Relations
+  parentDocumentUuid        String?           // For versioning/modifications  // ClientSafe
+  
+  // Processing Info
+  processingDuration      Int?           // Time taken to generate in ms // NOT ClientSafe
+  tokenCount             Int?           // Number of tokens used // NOT ClientSafe
+  completionTokens       Int?           // Tokens in completion // NOT ClientSafe
+  promptTokens           Int?           // Tokens in prompt // NOT ClientSafe
+  
+  // User Interaction
+  lastViewed             DateTime? // NOT ClientSafe
+  viewCount              Int            @default(0) // NOT ClientSafe
+  stringifiedUserFeedback       String? // NOT ClientSafe
+  stringifiedSentToPatient  String? // NOT ClientSafe
+  
+  // Consultation Context
+  consultSessionUuid     String? // ClientSafe
+  ConsultSession         ConsultSession? @relation("CreatedDocument", fields: [consultSessionUuid], references: [consultUuid], onDelete: Cascade) // NOT fully ClientSafe: Refer to ConsultSession model
+
+
+  // User Context
+  userId               String         // Who created this version // ClientSafe
+  user                 User          @relation(fields: [userId], references: [id]) // NOT ClientSafe
+
+  
+  // Timestamps for document lifecycle
+  submittedAt           DateTime?       // When submitted for processing // NOT ClientSafe
+  completedAt           DateTime?       // When generation completed // NOT ClientSafe
+  modifiedAt            DateTime?       // When last modified // ClientSafe
+
+  // Metadata
+  situation     String?  // Was this generated DURING_CONSULT, AFTER_CONSULT, IN_HISTORY // NOT ClientSafe
+  trigger       NoteTrigger?  // Was this a SYSTEM triggered, or USER triggered // NOT ClientSafe
+  timeIntoConsult           String?    // If time into consult, how long into the consult in seconds // ClientSafe
+  minutesPostConsult        String?    // If after consult, how long after the consult in minutes // NOT ClientSafe
+  usedFormulation String?
+
+  consentTexts         Json?          // Store consent settings as JSON // ClientSafe
+
+  edits Edit[]
+
+  @@index([consultSessionUuid])
+  @@index([userId]) // Add this index for better query performance
+}
+
+enum NoteTrigger {
+  SYSTEM
+  TIMER
+  USER
+}
+
+model Edit {
+  id          Int      @id @default(autoincrement())  //  ClientSafe
+  uuid        String   @unique @default(uuid())  //  ClientSafe
+  createdAt   DateTime @default(now())  //  ClientSafe
+  
+  // Reference to the document being edited
+  documentUuid String  //  ClientSafe
+  document     CreatedDocument @relation(fields: [documentUuid], references: [uuid])  //  ClientSafe
+  
+  // Edit type and context 
+  editType     String    // "INSERT", "DELETE", "REPLACE"  //  ClientSafe
+  changeSource String    // "AUTOREPLACE", "SUGGESTION", "USER"  //  ClientSafe
+  
+  // Section information
+  sectionTitle String?   // Title of the section being edited //  ClientSafe
+  sectionDeleted Boolean @default(false) // NOT ClientSafe
+  
+  // Content changes
+  previousContent String?  /// @encrypted
+  newContent     String?  /// @encrypted
+  charactersChanged Int  //  ClientSafe
+  
+  // Position information
+  startPosition  Int?     // Starting position of the edit  //  ClientSafe
+  endPosition    Int?     // Ending position of the edit  //  ClientSafe
+  
+  // Additional metadata
+  editedBy      String?   // User who made the edit // NOT ClientSafe
+  reason        String?   // Reason for the edit if provided // NOT ClientSafe
+  
+  @@index([documentUuid])
+  @@index([createdAt])
+}
+
+// TranscriptBlock: NOT ClientSafe
+model TranscriptBlock {
+  id                 Int            @id @unique @default(autoincrement()) // ClientSafe
+  transcriptUuid     String         @unique // ClientSafe
+  consultSession     ConsultSession @relation(fields: [consultSessionUuid], references: [consultUuid], onDelete: Cascade)// NOT fully ClientSafe
+  consultSessionUuid String // ClientSafe
+  createdAt          DateTime       @default(now()) // ClientSafe
+
+  inferenceSource   String? // Fly or Sagemaker // NOT ClientSafe
+  audioSource        String? // Can be: File, Microphone, SystemAudio // ClientSafe
+
+  timeStart          String? // ClientSafe
+  timeEnd            String? // ClientSafe
+
+  speaker            String? // ClientSafe
+  contentLength      Int? // ClientSafe
+  content            String @default("") /// @encrypted // ClientSafe
+  contentTimestamped            String @default("") /// @encrypted
+}
+
+// SMSVerification: NOT ClientSafe
+model SMSVerification {
+  id        Int      @id @default(autoincrement())
+  userId    String   @unique
+  code      String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  attempts  Int      @default(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// SMSSendLog: NOT ClientSafe
+model SMSSendLog {
+  id          Int      @id @default(autoincrement())
+  phoneNumber String
+  sentAt      DateTime @default(now())
+}
+
+// AudioInferenceAttempt: NOT ClientSafe
+model AudioInferenceAttempt {
+  id                Int      @id @default(autoincrement())
+  source            String   // Fly or Sagemaker
+  environment       String   // DEV, development, preview, production
+  version           String   // Svelte Config Version
+  attemptTimestamp  DateTime @default(now())
+  result            ResultOfInferenceAttempt
+  errorMessage      String?
+  responseTimeMs    Int?     // Response time in milliseconds
+}
+
+enum ResultOfInferenceAttempt {
+  SUCCESS
+  FAIL
+  TIMEOUT
+}
+
+// PatientInfo: ClientSafe
+model PatientInfo {
+  patient_id      Int              @id @unique @default(autoincrement())
+  first_name      String? /// @encrypted
+  middle_name     String? /// @encrypted @default("NewPatient")
+  last_name       String? /// @encrypted @default("NewPatient")
+  date_of_birth   String? /// @encrypted @default("01/01/1900")
+  gender          String? /// @encrypted @default("") // Options are M/F/N
+  age             Int?             @default(0)
+  authUserId      String
+  authUser        User         @relation(fields: [authUserId], references: [id])
+
+  silknotePatientUuid String?   
+
+  consultSessions ConsultSession[]
+  
+  @@map("patient_info")
+  @@index([authUserId])
+  @@index([silknotePatientUuid])
+}
+
+// OutputDocument: ClientSafe
+model OutputDocument {
+  id  Int      @id @default(autoincrement())
+  type String?
+  title String?
+  stringifiedOutputData String? /// @encrypted
+  stringOutput String? /// @encrypted
+  stringifiedSchemaUsed String? /// @encrypted
+
+  ConsultSession                ConsultSession?      @relation(fields: [consultSessionUuid], references: [consultUuid], onDelete: Cascade)
+  consultSessionUuid         String?
+
+}
+
+// DeletedConsultSession: NOT ClientSafe
+model DeletedConsultSession {
+  consultId                      Int      @id @default(autoincrement())
+  consultUuid                    String   @unique
+  sessionToken                   String
+  consultDate                    DateTime
+  authUserId                     String
+  authUser                       User @relation(fields: [authUserId], references: [id])
+  lengthOfConsultSec             Int
+  numTranscriptBlocksWithLowChar Int
+  consultType                    String   @default("consult") // consult, telehealth, dictation
+
+  submittedForProcessing DateTime?
+  deletedAt              DateTime  @default(now())
+  userDeleted            Boolean   @default(false)
+  sentToStripe           Boolean   @default(false)
+
+  createdDayMonthYearString   String?
+  numberOfLLMSubmissionsTotal Int     @default(0)
+
+  customDocuments CustomDocument[] // Stores the custom documents created for this ConsultSession
+
+   @@map("deleted_consult_session")
+}
+
+// UserOptions: NOT fully ClientSafe
+model UserOptions {
+  user_id  String   @id @unique 
+  authUser User @relation(fields: [user_id], references: [id])
+
+  wantsTutorial  Boolean @default(false)
+  autoGenerateNotes Boolean @default(true)
+
+  deleteNotesAfterXDays Int     @default(7) 
+  neverRetainNotes      Boolean @default(false) 
+  lastNoteClear         DateTime  @default(now()) // NOT ClientSafe
+
+  // For PrefersXtoY, SkeletonUI uses Int for Radio Group IDs so this is used instead of booleans
+  primaryNotePrefersBulletPoints                  Int     @default(1) // 1 = True = Prefers Bullet Points, 0 = False = Prefers Dashes
+  primaryNotePrefersDotsToDashes                  Int     @default(0) // 1 = True = Prefers Dots, 0 = False = Prefers Dashes
+  primaryNoteApproximateWordsPerBulletPoint       Int     @default(6)
+  primaryNotePrefersSOAPToFullHistory             Boolean @default(false)
+  primaryNoteRemoveUnusedHeadings                 Boolean @default(false)
+  primaryNoteNumberOfDotPointsPerMinuteForHistory Int     @default(2)
+  primaryNoteConsentText                          String  @default("(Patient verbally consented to audio transcription with Silknote, that:\n- Audio recording would be done of consultation\n- This is for the purpose of creating notes\n- They are free to decline if desired)")
+  primaryNoteCustomInstruction                    String  @default("")
+
+  telehealthConsentText                              String @default("(Patient verbally consented to audio transcription with Silknote, that:\n- Audio recording would be done of consultation\n- This is for the purpose of creating notes\n- They are free to decline if desired)")
+  telehealthTextAppendOrPrepend                      Int     @default(1) // 0 = Prepend, 1 = Append
+  telehealthAppendText String @default("(Patient identity verified and patient consented to Medicare billing)")
+
+  dictationAppendText                               String  @default("(Patient verbally consented to audio transcription with Silknote, that:\n- Audio recording would be done of consultation\n- This is for the purpose of creating notes\n- They are free to decline if desired)")
+  dictationAppendOrPrependText                      Int     @default(1) // 0 = Prepend, 1 = Append
+
+  mdtNoteCustomInstruction String @default("Make the following changes to my notes as they are created... ")
+  mdtNoteConsentText       String @default("(All people participating in the MDT were verbally consented to audio transcription with Silknote, that:\n- Audio transcription is offered as an opt-in \n- This is for the purpose of creating notes and not making clinical suggestion)")
+
+  letterToSpecialistCustomInstruction String @default("")
+  letterToPatientCustomInstruction    String @default("")
+
+  customDocuments CustomDocument[] // WORK: Review whether this is needed/used
+
+  textOnlyInputs Boolean @default(false) // NOT ClientSafe
+  advancedOutput Boolean @default(false) // NOT ClientSafe
+
+  stringReplacementsForTextEditor StringReplacement[]  @relation("ReplacementUserOptionsRelation") // ClientSafe
+
+  prefersLocalAudioProcessing Boolean @default(false) // ClientSafe
+  prefersLocalLLMProcessing Boolean @default(false) // ClientSafe
+  prefersLocalOCRProcessing Boolean @default(false)  // ClientSafe
+
+
+
+  @@map("user_options")
+}
+
+
+// UserDevelopmentOptions: ClientSafe
+model UserDevelopmentOptions {
+  user_id  String   @id @unique
+  authUser User @relation(fields: [user_id], references: [id]) 
+
+  allDevelopmentMode        Boolean @default(false) // NOT ClientSafe
+  noteOutputDevelopmentMode Boolean @default(false) // NOT ClientSafe
+  recorderDevelopmentMode   Boolean @default(false) // NOT ClientSafe
+
+  @@map("user_development_options")
+}
+
+// StringReplacements: ClientSafe
+model StringReplacement {
+  id             String          @id @default(cuid())
+  userId         String
+  user           User        @relation("ReplacementUserRelation", fields: [userId], references: [id], map: "Replacement_userId_fkey")
+  userSettingsId String
+  userSettings   UserOptions     @relation("ReplacementUserOptionsRelation", fields: [userSettingsId], references: [user_id], map: "Replacement_userSettingsId_fkey")
+  targetString   String
+  replacementString String
+
+  onlyForDocument String?
+
+  @@map("user_string_replacements")
+}
+
+// CustomDocument: NOT fully ClientSafe - 
+model CustomDocument {
+  id           Int       @id @unique @default(autoincrement()) // NOT ClientSafe
+  documentUuid String    @unique @default(uuid()) // SharedSafe
+  userId       String? // ClientSafe
+  authUser     User? @relation(fields: [userId], references: [id], map: "user_custom_document_userId_fkey") // ClientSafe
+  createdAt    DateTime  @default(now()) // ClientSafe
+
+
+  isCustom Boolean @default(true) // SharedSafe - not in use.
+
+  consultSessionId        Int? // NOT ClientSafe = can likely be removed as CustomDocument should just relate to a user
+  consultSession          ConsultSession?        @relation(fields: [consultSessionId], references: [consultId]) // NOT ClientSafe = can likely be removed as CustomDocument should just relate to a user
+  deletedConsultSessionId Int? // NOT ClientSafe = can likely be removed as CustomDocument should just relate to a user
+  deletedConsultSession   DeletedConsultSession? @relation(fields: [deletedConsultSessionId], references: [consultId]) // NOT ClientSafe = can likely be removed as CustomDocument should just relate to a user
+
+  shareDocumentWithOrganisation Boolean  @default(false) // ClientSafe
+  shareDocumentWithEveryone     Boolean  @default(false) // ClientSafe
+  userRating                    Float    @default(0.0) // SharedSafe
+  votes                         Vote[] // NOT ClientSafe
+  categories                    String[] // ClientSafe
+
+  organisationId Int? // NOT ClientSafe
+  organisation   Organisation? @relation(fields: [organisationId], references: [id]) // NOT ClientSafe
+
+  documentIsLetter Boolean @default(false) // SharedSafe
+
+  usedForConsultMethod String[] @default(["inperson", "telehealth", "dictation", "multiperson"]) // ClientSafe
+  usedForConsultTypes  String[] @default(["initial", "followup", "mdt"]) // ClientSafe
+
+  archived Boolean // ClientSafe
+
+  nonEditableTemplate Boolean @default(false) // SharedSafe
+  nonMedicalDocument Boolean @default(false) // SharedSafe
+
+  intendedOccupation String @default("Medical Practioner") // SharedSafe
+  intendedSpecialty  String @default("General Practioner") // SharedSafe
+
+  documentTitle String? // SharedSafe
+  documentIntro String? // ClientSafe
+  documentOutro String? // ClientSafe - Can be removed, not in use
+
+  documentFromName    String? // ClientSafe - Can be removed, not in use
+  documentFromAddress String? // ClientSafe - Can be removed, not in use
+  documentLogo        String? // ClientSafe - Can be removed, not in use
+
+  documentToName       String? // ClientSafe - Can be removed, not in use
+  documentToAddress    String? // ClientSafe - Can be removed, not in use
+  documentToProfession String? // ClientSafe - Can be removed, not in use
+
+  documentSectionInstruction DocumentSection[] // ClientSafe - Can be removed, not in use
+  UserOptions                UserOptions?      @relation(fields: [userOptionsUser_id], references: [user_id]) // NOT fully ClientSafe - See model
+  userOptionsUser_id         String? // ClientSafe
+
+  submittedForReview Boolean @default(false) // ClientSafe
+  reviewApproved     Boolean @default(false) // ClientSafe
+
+  isPDF Boolean @default(false) // SharedSafe
+  pdfUrl String? // SharedSafe
+  elements CustomDocumentElement[] // ClientSafe
+
+
+  @@map("user_custom_document")
+}
+
+// DocumentSection: ClientSafe
+model DocumentSection {
+  id                             Int     @id @unique @default(autoincrement())
+  uuid                           String  @default(uuid())
+  headingNumber                  Int // ClientSafe
+  title                          String // SharedSafe
+  includeHeading                 Boolean // SharedSafe
+  includeHeadingString           String  @default("include")
+  generateOrStatic               String // ClientSafe
+  paragraphOrBulletPoints        String // SharedSafe
+  prefersDashesVsDots            Boolean // SharedSafe
+  terminology                    String // ClientSafe // Medical or laymans
+  content                        String  @default("")  // ClientSafe: This is the LLM prompt for the section
+  approximateWordsPerBulletPoint Int     @default(8) // ClientSafe
+  styling                        String? // ClientSafe: Will use this to store JSON as string, not implemented at present
+
+  customDocumentId Int // ClientSafe
+  CustomDocument   CustomDocument @relation(fields: [customDocumentId], references: [id]) // NOT fully ClientSafe - see CustomDocument model
+
+  usedInDefaultDocument Boolean @default(false) // ClientSafe: Not in use
+  usedInSilknoteLayout  Boolean @default(false) // ClientSafe: Not in use
+  silknoteLayoutName    String? // ClientSafe: Not in use
+  silknoteLayoutSection String? // ClientSafe: Not in use
+
+  @@unique([headingNumber, customDocumentId])
+  @@map("document_section")
+}
+
+// CustomDocumentElement: ClientSafe, used in PDFs with 1 for each DocumentSection
+model CustomDocumentElement {
+  id                              Int  @id @unique @default(autoincrement())
+  uuid                           String         @default(uuid())
+  customDocumentId               Int // ClientSafe
+  customDocument                 CustomDocument @relation(fields: [customDocumentId], references: [id]) // ClientSafe
+  
+  prompt                         String // ClientSafe
+
+  headingNumber                  Int // SharedSafe
+  title                          String // SharedSafe
+  includeHeading                 Boolean // SharedSafe
+  includeHeadingString           String         @default("include")  // SharedSafe
+  generateOrStatic               String  // SharedSafe
+  paragraphOrBulletPoints        String  // SharedSafe
+  prefersDashesVsDots            Boolean  // SharedSafe
+  terminology                    String  // SharedSafe
+  content                        String[]         @default([]) // ClientSafe
+  approximateWordsPerBulletPoint Int            @default(8) // ClientSafe
+  styling                        String?  // SharedSafe: ??Unsure if in use
+  
+  usedInDefaultDocument          Boolean        @default(false)  // SharedSafe: Not in use - can likely be removed
+  usedInSilknoteLayout           Boolean        @default(false) // SharedSafe: Not in use - can likely be removed
+  silknoteLayoutName             String?  // SharedSafe: Not in use - can likely be removed
+  silknoteLayoutSection          String?  // SharedSafe: Not in use - can likely be removed
+  
+  elementType     ElementType // SharedSafe
+  x                              Float // SharedSafe
+  y                              Float // SharedSafe
+  width                          Float // SharedSafe
+  height                         Float // SharedSafe
+  value                          String? // SharedSafe
+  checked                        Boolean? // SharedSafe
+  options                        String[] // SharedSafe
+  isRendered                     Boolean // SharedSafe
+  optional                       Boolean // SharedSafe
+  pageIndex                      Int // SharedSafe
+  fontSize                       Float // SharedSafe
+  lines                          Int // SharedSafe
+  
+  spaceBetweenOptions            Int    @default(1) // SharedSafe
+  orientationVertical            Boolean @default(false) // SharedSafe
+
+  @@map("custom_document_elements")
+}
+
+enum ElementType {
+  CHECKBOX
+  TEXTAREA
+  RADIO
+}
+
+
+// Vote: NOT ClientSafe
+model Vote {
+  id               Int            @id @default(autoincrement())
+  userId           String
+  user             User           @relation(fields: [userId], references: [id])
+  customDocumentId Int
+  customDocument   CustomDocument @relation(fields: [customDocumentId], references: [id])
+  value            Int            @default(0)  // This could be 1 for upvote, -1 for downvote, or any other scoring system
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@unique([userId, customDocumentId])
+  @@map("votes")
+}
+
+// OrganisationUser: NOT ClientSafe if being loaded by someone who isn't an organisation Admin
+model Organisation {
+  id               Int         @id @unique @default(autoincrement())
+  name             String
+  stripeCustomerId String? // Unique identifier for Stripe billing
+  subscriptions    Subscription[] // Relation to manage multiple subscriptions
+
+  addressLine1 String?
+  addressLine2 String?
+  city         String?
+  postcode     String?
+  country      String?
+
+  phoneNumber String?
+  email       String?
+  website     String?
+  image       String?
+
+  organisationToken String? @unique
+
+  activePublicCustomDocumentUuids String[]
+
+  organisationUsers     OrganisationUser[]
+  usersRequestingToJoin User[]
+
+  contactPerson      String?
+  contactEmail       String?
+  contactPhone       String?
+  primaryLanguage    String           @default("English")
+  timezone           String           @default("AWST")
+  logRetentionPeriod Int              @default(180) // Log retention days
+  CustomDocument     CustomDocument[]
+
+ joinRequests OrganisationJoinRequest[]
+
+
+  @@map("organisations")
+}
+
+// OrganisationUser: NOT ClientSafe if exposing Organisation
+model OrganisationUser {
+  id             Int           @id @unique @default(autoincrement())
+  authUserId     String           @unique
+  createdAt      DateTime     @default(now())
+  authUser       User         @relation(fields: [authUserId], references: [id])
+  organisationId Int
+  organisation   Organisation     @relation(fields: [organisationId], references: [id])
+ assignedSubscription Boolean @default(false)
+ 
+  role           OrganisationRole
+
+  @@map("organisation_user")
+}
+
+// OrganisationJoinRequest: NOT ClientSafe if exposing Organisation
+model OrganisationJoinRequest {
+  id                 String      @id @default(cuid())
+  requestDate        DateTime    @default(now())
+  authUser           User    @relation(fields: [authUserId], references: [id])
+  authUserId         String
+  organisationToken  String
+  organisationExists Boolean     @default(false)
+  accepted           Boolean     @default(false)
+  organisation       Organisation? @relation(fields: [organisationId], references: [id])
+  organisationId     Int?
+
+  @@map("organisation_join_requests")
+}
+
+enum OrganisationRole {
+  USER
+  ADMIN
+  OWNER
+}
+
+enum Role {
+  USER
+  PREMIUM
+  TIER1
+  TIER2
+  TIER3
+  ADMIN
+}
+
+model Subscription {
+  id               Int              @id @unique @default(autoincrement())
+  plan             String
+  isActive         Boolean          @default(true)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  renewalDate      DateTime
+  subscriptionType SubscriptionType
+  stripeCustomerId String?
+  stripeSubscriptionId String?
+  billingMethod    BillingMethod
+
+  // Optional linkage to Organisation
+  organisation   Organisation? @relation(fields: [organisationId], references: [id])
+  organisationId Int?
+  maxUsers         Int? 
+
+  // Optional linkage to individual User
+  user   User? @relation(fields: [userId], references: [id])
+  userId String?   @unique
+
+  @@map("subscriptions")
+}
+
+enum SubscriptionType {
+  INDIVIDUAL
+  ORGANISATION
+}
+
+enum BillingMethod {
+  AUTOMATIC
+  MANUAL
+}
+
+model TokenUsage {
+  id         String    @id @default(uuid())
+  model      String
+  tokens     Int
+  type       TokenType // Add this line
+  timestamp  DateTime  @default(now())
+  authUserId String
+  userEmail  String
+
+  User User @relation(fields: [authUserId], references: [id])
+
+  @@index([model, timestamp])
+}
+
+enum TokenType {
+  PROMPT
+  COMPLETION
+}
+
+model RateLimitLog {
+  id        String   @id @default(cuid())
+  ipAddress String
+  userAgent String
+  cookie    String?
+  userId    String?
+  timestamp DateTime @default(now())
+  event     String
+  duration  Int?
+  type      String
+}
+
+model RateLimit {
+  id        Int       @id @default(autoincrement())
+  key       String    @unique
+  count     Int
+  expire_at DateTime
+  userId    String?
+  type      String
+  user      User? @relation(fields: [userId], references: [id])
+
+  @@index([userId], name: "idx_rate_limit_user")
+}
+
+
+model ActionLog {
+  id            Int      @id @default(autoincrement())
+  userId        String
+  user          User @relation(fields: [userId], references: [id])
+  createdAt     DateTime @default(now())
+  actionType    String // Could be 'audio' or 'llm'
+  audioDuration Int? // Nullable, only applicable for audio logs
+  llmInfo       String? // Nullable, could store JSON or any string info for LLM requests
+
+
+  @@map("action_log")
+}
+
+model BannerMessage {
+id Int        @id @unique @default(autoincrement())
+message String
+  createdAt  DateTime @default(now()) @db.Timestamp(6)
+  updatedAt  DateTime @updatedAt @db.Timestamp(6)
+  timeOutMinutes Int?
+active Boolean
+  @@map("banner_message")
+}
+
+model Referral {
+  id             String   @id @default(cuid())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  referrerId        String
+  referrer          User @relation("ReferralsMade", fields: [referrerId], references: [id])
+  referredEmail     String?
+  
+  active     Boolean  @default(false) // User signed up
+  subscribed Boolean  @default(false) // User is now a payinig user
+  credited   Boolean  @default(false) // We rewarded the referrer
+
+  @@map("referral")
+}
+
+model Job {
+  id        String   @id @default(cuid())
+  status    String
+  result    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  files     File[]
+
+}
+model File {
+  id        String   @id @default(cuid())
+  fileName  String
+  fileType  String
+  blobUrl   String
+  uploadedAt DateTime @default(now())
+  jobId     String?
+  job       Job?     @relation(fields: [jobId], references: [id])
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+ 
+}
+
+
+// --- Below: table structure that also appears in VSRX --- 
+// --- Updated Silknote Patient/Document Models ---
+
+model SilknotePatientFileset {
+  silknotePatientUuid String    @id @unique @default(uuid())
+
+  // Link back to the owning User
+  silknoteUserUuid              String 
+  user                User      @relation(fields: [silknoteUserUuid], references: [id])
+
+  // Store patient context directly here, mirroring PatientDetails
+  patientName         String? 
+  patientDob          String?   // Expected format: DD/MM/YYYY
+  gender              String?   // Store gender (e.g., "Male", "Female", "Neutral", "Other") - Default applied in code
+
+  // Store complex objects as stringified JSON
+  vectorStoreJson     String?   @db.Text // Stores stringified PatientVectorStore
+  caseSummaryJson     String?   @db.Text // Stores stringified caseSummary (type: any)
+
+  // Other relevant fields from PatientDetails
+  summaryGenerationCount Int?    @default(0)
+
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  // Relation to documents associated with this patient UUID
+  documents           SilknoteDocument[]
+
+  @@map("silknote_patient_filesets")
+  @@index([silknotePatientUuid])
+}
+
+model SilknoteDocument {
+  silknoteDocumentUuid String    @id @unique @default(uuid())
+
+  // Foreign key linking to the patient fileset UUID
+  patientUuid          String
+  // Relation links this document to the *fileset* using the patient UUID
+  patientFileset       SilknotePatientFileset @relation(fields: [patientUuid], references: [silknotePatientUuid], onDelete: Cascade)
+
+  // --- Essential Document Metadata ---
+  originalName         String
+  storedPath           String?
+  status               String
+  category             String    /// @encrypted // Example encryption
+  mimeType             String
+  sizeBytes            Int?
+  pageCount            Int?      /// @encrypted // Changed from String?
+  documentDate         String?                  // Removed encryption comment
+  uploadDate           DateTime  @default(now())
+  processedAt          DateTime?
+  title                String?   /// @encrypted
+  author               String?   /// @encrypted
+  sourceSystem         String?
+
+  // --- Encrypted Content Blobs ---
+  contentJson          String?   @db.Text /// @encrypted
+  alertsJson           String?   @db.Text /// @encrypted
+
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@map("silknote_documents")
+  @@index([patientUuid])
+  @@index([status])
+  @@index([category])
+}
+
+// --- Above: table structure that also appears in VSRX --- 
