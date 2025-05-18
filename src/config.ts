@@ -7,6 +7,8 @@ dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 // Development mode check
 const isDevelopment = process.env['NODE_ENV'] === 'development';
+const isProduction = process.env['NODE_ENV'] === 'production';
+const isTest = process.env['NODE_ENV'] === 'test';
 
 ////////////////////////////////////////////////////////////////
 // Environment variable validation schema
@@ -23,9 +25,10 @@ const envSchemaBase = z.object({
   VITE_BASE_URL: z.string({
     required_error: "VITE_BASE_URL is required (e.g., 'localhost' or 'yourdomain.com')"
   }),
-  VITE_PORT: z.string({
-    required_error: "VITE_PORT is required"
-  }).transform(Number),
+  // VITE_PORT is for Vite's dev server, or can inform the SERVER_PORT for local dev.
+  VITE_PORT: z.string().optional().default('3001').transform(Number), 
+  // SERVER_PORT is what the backend will try to listen on if process.env.PORT (from Heroku) isn't available.
+  SERVER_PORT: z.string().optional().default('3000').transform(Number),
   
   // Optional CORS_ORIGIN - can be a string
   CORS_ORIGIN: z.string().optional(),
@@ -73,20 +76,53 @@ const envSchema = envSchemaBase.superRefine((data, ctx) => {
 // Parse and validate environment variables
 const parsedEnv = envSchema.parse(process.env);
 
-// Compute public base URL with protocol
-const protocol = parsedEnv.VITE_BASE_URL === 'localhost' ? 'http' : 'https';
-const wsProtocol = parsedEnv.VITE_BASE_URL === 'localhost' ? 'ws' : 'wss';
-const publicBaseUrl = `${protocol}://${parsedEnv.VITE_BASE_URL}:${parsedEnv.VITE_PORT}`;
-const wsBaseUrl = `${wsProtocol}://${parsedEnv.VITE_BASE_URL}:${parsedEnv.VITE_PORT}`;
+// Determine the actual port the server will listen on
+let actualServerPort: number;
+if (isTest) {
+  actualServerPort = 4001; // Fixed port for testing
+} else if (process.env['PORT']) {
+  actualServerPort = Number(process.env['PORT']); // Heroku-provided port
+} else {
+  actualServerPort = parsedEnv.SERVER_PORT; // From .env or default for local dev
+}
+
+// Determine protocol and public base URL
+const protocol = (parsedEnv.VITE_BASE_URL === 'localhost' || isDevelopment && !isProduction) ? 'http' : 'https';
+const wsProtocol = (parsedEnv.VITE_BASE_URL === 'localhost' || isDevelopment && !isProduction) ? 'ws' : 'wss';
+
+let publicHost = parsedEnv.VITE_BASE_URL;
+let publicPortSegment = `:${actualServerPort}`; // Start with the actual server port
+
+if (isProduction) {
+  // For production (e.g., Heroku), if VITE_BASE_URL is a domain, it usually implies standard ports.
+  // Heroku handles port mapping, so we typically don't include the internal `actualServerPort` (e.g. 3000 if that was default)
+  // in the public URL if VITE_BASE_URL is the Heroku domain.
+  // If VITE_BASE_URL is just 'localhost' even in prod (unlikely for true Heroku), this logic might need adjustment.
+  // Assuming VITE_BASE_URL is the public domain name on Heroku.
+  publicPortSegment = ''; // Standard ports 80/443 are implied
+} else if (isDevelopment || parsedEnv.VITE_BASE_URL === 'localhost') {
+  // For local development, use the VITE_PORT for the public URL if it's different from the server port,
+  // as Vite dev server might run on a different port than the backend.
+  // However, if they are the same or VITE_PORT is what the server uses, actualServerPort is fine.
+  // Using actualServerPort which defaults to SERVER_PORT (e.g. 3000) or VITE_PORT (e.g. 3001) if .env is set.
+  // If your Vite dev server and backend server run on *different* ports locally, and you want
+  // publicBaseUrl to point to Vite, use parsedEnv.VITE_PORT here.
+  // For simplicity, we'll assume publicBaseUrl reflects where the API is served.
+   publicPortSegment = `:${actualServerPort}`;
+}
+
+
+const publicBaseUrl = `${protocol}://${publicHost}${publicPortSegment}`;
+const wsBaseUrl = `${wsProtocol}://${publicHost}${publicPortSegment}`;
 
 // Override port in test mode to ensure consistency
 const env = {
   ...parsedEnv,
-  PORT: parsedEnv.NODE_ENV === 'test' ? 4001 : parsedEnv.VITE_PORT,
+  PORT: actualServerPort, // This is the port the server will *actually* listen on
   // Support multiple origins based on environment
   CORS_ORIGIN: parsedEnv.CORS_ORIGIN || 
-    (parsedEnv.NODE_ENV === 'development' 
-      ? ['http://localhost:3000', publicBaseUrl].filter(Boolean) 
+    (isDevelopment 
+      ? ['http://localhost:3000', `http://localhost:${parsedEnv.VITE_PORT}`, publicBaseUrl].filter(Boolean).reduce((acc, curr) => acc.includes(curr) ? acc : [...acc, curr], [] as string[])
       : publicBaseUrl),
   PUBLIC_BASE_URL: publicBaseUrl,
   WS_BASE_URL: wsBaseUrl,
@@ -125,7 +161,7 @@ const config: Config = {
     }
   },
   server: {
-    port: process.env['PORT'] ? Number(process.env['PORT']) : env.PORT,
+    port: env.PORT, // Use the reliably determined env.PORT
     nodeEnv: env.NODE_ENV,
     isDevelopment: env.NODE_ENV === 'development',
     isProduction: env.NODE_ENV === 'production',
@@ -133,7 +169,7 @@ const config: Config = {
     corsOrigin: env.CORS_ORIGIN,
     publicBaseUrl: env.PUBLIC_BASE_URL,
     wsBaseUrl: env.WS_BASE_URL,
-    baseUrl: env.VITE_BASE_URL
+    baseUrl: env.VITE_BASE_URL // This remains the raw base URL/host
   },
   processing: {
     maxFileSize: 50 * 1024 * 1024, // 50MB
