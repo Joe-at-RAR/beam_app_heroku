@@ -30,8 +30,10 @@ const envSchemaBase = z.object({
   // SERVER_PORT is what the backend will try to listen on if process.env.PORT (from Heroku) isn't available.
   SERVER_PORT: z.string().optional().default('3000').transform(Number),
   
-  // Optional CORS_ORIGIN - can be a string
-  CORS_ORIGIN: z.string().optional(),
+  // CORS_ORIGIN can be a comma-separated list of allowed origins
+  CORS_ORIGIN: z.string().optional().transform((val) => 
+    val ? val.split(',').map(origin => origin.trim()) : undefined
+  ),
   
   // Azure Search - Optional in development
   AZURE_SEARCH_ENDPOINT: isDevelopment ? z.string().optional() : z.string(),
@@ -91,46 +93,41 @@ const protocol = (parsedEnv.VITE_BASE_URL === 'localhost' || isDevelopment && !i
 const wsProtocol = (parsedEnv.VITE_BASE_URL === 'localhost' || isDevelopment && !isProduction) ? 'ws' : 'wss';
 
 let publicHost = parsedEnv.VITE_BASE_URL;
-let publicPortSegment = `:${actualServerPort}`; // Start with the actual server port
+let publicPortSegment = `:${actualServerPort}`;
 
 if (isProduction) {
-  // For production (e.g., Heroku), if VITE_BASE_URL is a domain, it usually implies standard ports.
-  // Heroku handles port mapping, so we typically don't include the internal `actualServerPort` (e.g. 3000 if that was default)
-  // in the public URL if VITE_BASE_URL is the Heroku domain.
-  // If VITE_BASE_URL is just 'localhost' even in prod (unlikely for true Heroku), this logic might need adjustment.
-  // Assuming VITE_BASE_URL is the public domain name on Heroku.
-  publicPortSegment = ''; // Standard ports 80/443 are implied
+  publicPortSegment = ''; 
 } else if (isDevelopment || parsedEnv.VITE_BASE_URL === 'localhost') {
-  // For local development, use the VITE_PORT for the public URL if it's different from the server port,
-  // as Vite dev server might run on a different port than the backend.
-  // However, if they are the same or VITE_PORT is what the server uses, actualServerPort is fine.
-  // Using actualServerPort which defaults to SERVER_PORT (e.g. 3000) or VITE_PORT (e.g. 3001) if .env is set.
-  // If your Vite dev server and backend server run on *different* ports locally, and you want
-  // publicBaseUrl to point to Vite, use parsedEnv.VITE_PORT here.
-  // For simplicity, we'll assume publicBaseUrl reflects where the API is served.
    publicPortSegment = `:${actualServerPort}`;
 }
-
 
 const publicBaseUrl = `${protocol}://${publicHost}${publicPortSegment}`;
 const wsBaseUrl = `${wsProtocol}://${publicHost}${publicPortSegment}`;
 
-// Override port in test mode to ensure consistency
+// Determine CORS origins
+let corsOrigins: string | string[];
+if (parsedEnv.CORS_ORIGIN) {
+  corsOrigins = parsedEnv.CORS_ORIGIN; // Use the (now potentially array) value from env var
+} else if (isDevelopment) {
+  corsOrigins = [
+    'http://localhost:3000', // Common CRA/Next.js dev port
+    `http://localhost:${parsedEnv.VITE_PORT}`, // Vite default/configured dev port
+    publicBaseUrl // The backend's own URL
+  ].filter(Boolean).reduce((acc, curr) => acc.includes(curr) ? acc : [...acc, curr], [] as string[]); // Deduplicate
+} else {
+  corsOrigins = publicBaseUrl; // Default to allowing only the backend's own origin in production if not specified
+}
+
 const env = {
   ...parsedEnv,
-  PORT: actualServerPort, // This is the port the server will *actually* listen on
-  // Support multiple origins based on environment
-  CORS_ORIGIN: parsedEnv.CORS_ORIGIN || 
-    (isDevelopment 
-      ? ['http://localhost:3000', `http://localhost:${parsedEnv.VITE_PORT}`, publicBaseUrl].filter(Boolean).reduce((acc, curr) => acc.includes(curr) ? acc : [...acc, curr], [] as string[])
-      : publicBaseUrl),
+  PORT: actualServerPort, 
+  CORS_ORIGIN: corsOrigins, // Assign the determined corsOrigins
   PUBLIC_BASE_URL: publicBaseUrl,
   WS_BASE_URL: wsBaseUrl,
   // Add storage type
   STORAGE_TYPE: parsedEnv.STORAGE_TYPE,
   AZURE_STORAGE_CONTAINER_NAME: parsedEnv.AZURE_STORAGE_CONTAINER_NAME,
 };
-
 
 ////////////////////////////////////////////////////////////////
 // Configuration object
