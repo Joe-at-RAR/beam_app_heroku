@@ -2,7 +2,8 @@ import {
     MedicalDocument,
     BaseDocIntelResult,
     BaseLLMResult,
-} from '../../../shared/types';
+    DocumentType
+} from '@shared/types';
 import { Readable } from 'stream';
 import { z } from 'zod'
 import { documentSchemas } from '../types/schemas';
@@ -126,11 +127,13 @@ export const createStageResult = <T>(
 
 
 
+/* // Commented out as unused
 interface DocumentTypeMapping {
     pattern: RegExp | string;
     type: DocumentType;
     confidence: number;
 }
+*/
 
 export interface TypeMatchResult {
     type: DocumentType;

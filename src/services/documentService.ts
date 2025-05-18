@@ -5,8 +5,6 @@ import { centralRateLimiter } from './centralRateLimiter'
 import * as patientService from './patientService'
 import { fromBuffer } from 'pdf2pic'
 import { processDocumentsForVectorStore } from './vectorStore'
-import path from 'path'
-import fs from 'fs'
 import { storageService } from '../utils/storage'
 import { createLogger } from '../utils/logger'
 
@@ -152,11 +150,11 @@ class SequentialProcessingQueue {
     }
   }
 
-  private updateAverageProcessingTime(newTime: number) {
-    this.processingStats.averageProcessingTime = 
-      (this.processingStats.averageProcessingTime * (this.processingStats.totalProcessed - 1) + newTime) 
-      / this.processingStats.totalProcessed;
-  }
+  // private updateAverageProcessingTime(newTime: number) {
+  //   this.processingStats.averageProcessingTime = 
+  //     (this.processingStats.averageProcessingTime * (this.processingStats.totalProcessed - 1) + newTime) 
+  //     / this.processingStats.totalProcessed;
+  // }
 
   /**
    * Gets the number of documents currently in the queue
@@ -369,7 +367,7 @@ async function processDocument(input: QueuedDocument): Promise<void> {
   
   // Process through stages sequentially
   for (const stage of processingStages) {
-    const stageStartTime = Date.now();
+    // const stageStartTime = Date.now();
     
     // Emit status update at the start of each processing stage
     io.to(room).emit('fileStatus', {
@@ -642,7 +640,7 @@ async function processDocument(input: QueuedDocument): Promise<void> {
           break;
       }
       
-      const stageDuration = Date.now() - stageStartTime;
+    //  const stageDuration = Date.now() - stageStartTime;
       // console.log('[PROCESSING] Stage completed:', {
       //   documentId,
       //   stage,
@@ -791,19 +789,17 @@ async function processDocument(input: QueuedDocument): Promise<void> {
     
     // Log client details after emission
     if (roomClients.size > 0) {
-      const clientDetails = Array.from(roomClients).map(clientId => {
-        const socket = io.sockets.sockets.get(clientId);
-        return {
-          id: clientId,
-          rooms: socket ? Array.from(socket.rooms) : [],
-          handshake: socket ? {
-            address: socket.handshake.address,
-            time: socket.handshake.time
-          } : null
-        };
-      });
-      
-      // console.log(`[DOCUMENT SERVICE] Client details for processingComplete [${completionEventId}]:`, clientDetails);
+      // const clientDetails = Array.from(roomClients).map(clientId => { // Unused variable
+      //   const socket = io.sockets.sockets.get(clientId);
+      //   return {
+      //     id: clientId,
+      //     rooms: socket ? Array.from(socket.rooms) : [],
+      //     handshake: socket ? {
+      //       address: socket.handshake.address,
+      //       time: socket.handshake.time
+      //     } : null
+      //   };
+      // });
     }
     
     // console.log(`***** END DOCUMENT PROCESSING COMPLETE EVENT [${completionEventId}] *****`);

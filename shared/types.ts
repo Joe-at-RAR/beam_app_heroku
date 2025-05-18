@@ -155,11 +155,11 @@ export interface ProcessingOptions {
 
 // Patient Details - Represents the logical patient entity in the application
 export interface PatientDetails { 
+  silknoteUserUuid: string;      // Consistent UUID of the owning User
   silknotePatientUuid: string;  // Non-optional consistent UUID for this patient/fileset
   name: string;
   dateOfBirth: string;           
   gender: string;                
-  silknoteUserUuid: string;      // Consistent UUID of the owning User
   fileSet: MedicalDocument[];    
   vectorStore: PatientVectorStore | null; 
   caseSummary: CaseSummaryApiResponse | null; 

@@ -10,19 +10,22 @@ import { createMySqlDatabaseAdapter } from './mysql/mysql-database-utils';
 import { createPrismaAdapter } from './prisma/prisma-database-utils';
 import { createAzureBlobFileAdapter } from './azure/azure-blob-file-adapter';
 import { v4 as uuidv4 } from 'uuid';
+import { createLogger } from '../utils/logger';
+
+const logger = createLogger('STORAGE_SERVICE');
 
 /** Helper Logging Functions **/
 function logInfo(message: string, data?: any): void {
-  console.log(`[STORAGE] INFO ${new Date().toISOString()} - ${message}`, data !== undefined ? data : '');
+  logger.info(message, data !== undefined ? data : '');
 }
 
-function logDebug(message: string, data?: any): void {
-  console.log(`[STORAGE] DEBUG ${new Date().toISOString()} - ${message}`, data || '');
-}
+// function logDebug(message: string, data?: any): void { // Commented out as unused
+//   logger.appDebug(message, data);
+// }
 
 function logError(message: string, error?: Error | any, context?: any): void {
   const errorDetails = error instanceof Error ? { message: error.message, stack: error.stack } : error;
-  console.error(`[STORAGE] ERROR ${new Date().toISOString()} - ${message}`, { error: errorDetails, context: context !== undefined ? context : {} });
+  logger.error(message, { error: errorDetails, context: context !== undefined ? context : {} });
 }
 
 export type StorageType = 'LOCAL' | 'POSTGRES_PRISMA' | 'MYSQL';

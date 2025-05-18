@@ -54,7 +54,7 @@ import {
 import config from '../config';
 import { MedicalDocument, AnalyzerInput, DocumentType, EnrichedExtraction } from '@shared/types';
 import { 
-  PageExtractionSchema, 
+  // PageExtractionSchema, // Commented out as unused in active code
   PageExtractionSchemaPart1, 
   PageExtractionSchemaPart2, 
   PageExtractionSchemaPart3,
@@ -62,11 +62,11 @@ import {
   combineExtractionParts 
 } from '@shared/extraction-schema';
 import { processExtraction, aggregateExtractions } from './analyzer/enrich-extraction';
-import { ZodObject, ZodType } from 'zod';
 import { centralRateLimiter } from './centralRateLimiter';
 import zodToJsonSchema from 'zod-to-json-schema';
 import { generateStructuredOutput } from './llmService';
 import { prepareJsonSchema } from '../utils/schemaUtils';
+
 
 const documentClient = new DocumentAnalysisClient(
   config.azure.documentIntelligence.endpoint,
@@ -316,7 +316,7 @@ Focus on extracting: procedures, imaging, recommendations, contact information, 
             system: string, 
             prompt: string, 
             schema: any, 
-            schemaName: string
+            _schemaName: string
           ): Promise<AzureOpenAIResult> {
             return rateLimiter.executeWithRetry(
               async () => {
@@ -459,13 +459,13 @@ Focus on extracting: procedures, imaging, recommendations, contact information, 
           // If it's a schema validation error, provide more specific information
           if (errorObj.message.includes('schema') || errorObj.message.includes('validation')) {
             // Extract the specific validation error if present
-            const validationDetails = errorObj.message.includes('Validation error:') 
-              ? errorObj.message.split('Validation error:')[1].trim() 
-              : (errorObj.message.includes('Error:') 
-                ? errorObj.message.split('Error:')[1].trim() 
-                : 'Unknown schema validation issue');
+          //  const _validationDetails = errorObj.message.includes('Validation error:') 
+              // ? errorObj.message.split('Validation error:')[1].trim() 
+              // : (errorObj.message.includes('Error:') 
+              //   ? errorObj.message.split('Error:')[1].trim() 
+              //   : 'Unknown schema validation issue');
             
-            //console.log(`[DOC ANALYZER] Schema validation failed: ${validationDetails}`);
+            //console.log(`[DOC ANALYZER] Schema validation failed: ${_validationDetails}`);
             
             // Log which part of the extraction failed
             if (error.config?.data) {

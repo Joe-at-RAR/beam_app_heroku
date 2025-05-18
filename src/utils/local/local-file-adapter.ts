@@ -7,9 +7,11 @@ import { v4 as uuidv4 } from 'uuid';
 import { FileStorageAdapter, StorageError } from '../storage-interfaces';
 import config from '../../config'; // Import the config object
 
+// const _logger = createLogger('LOCAL_FILE_ADAPTER');
+
 // --- Logging Helpers ---
-function logInfo(message: string, data?: any): void {
- // console.log(`[LOCAL FILE ADAPTER] INFO ${new Date().toISOString()} - ${message}`, data ?? '');
+function logInfo(_message: string, _data?: any): void {
+  // logger.info(message, data);
 }
 function logError(message: string, error?: Error | any, context?: any): void {
   const errorDetails = error instanceof Error ? { message: error.message, stack: error.stack } : error;
@@ -107,7 +109,7 @@ export function createLocalFileAdapter(): FileStorageAdapter {
       if (!tempUploadDir) {
          logError('Temp directory must be provided for Multer configuration');
          // Return a handler that immediately errors out
-         return (_req, res, next) => next(new Error('File upload middleware not configured'));
+         return (_req, _res, next) => next(new Error('File upload middleware not configured'));
       }
       logInfo(`Configuring Multer for temp directory: ${tempUploadDir}`);
       const storage = multer.diskStorage({

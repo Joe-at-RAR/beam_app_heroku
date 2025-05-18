@@ -36,11 +36,13 @@ interface FormidableFile {
   size: number;
 }
 
-class FileProcessor {
+export class FileProcessor {
   private static instance: FileProcessor;
   private processingQueue: string[] = [];
   private isProcessing: boolean = false;
   private processingInterval: NodeJS.Timeout | null = null;
+  // private _isProcessingQueue = false;
+  // private _fileProcessTimeout: NodeJS.Timeout | null = null;
 
   private constructor() {}
 
@@ -141,98 +143,13 @@ class FileProcessor {
     }
   }
 
-  private async checkForUnprocessedFiles() {
-    const timestamp = new Date().toISOString();
-    console.log(`[${timestamp}] [FILE PROCESSOR] Checking for unprocessed files...`);
+  // private async checkForUnprocessedFiles() { // Unused
+  //   // ... logic ...
+  // }
 
-    if (this.isProcessing) {
-      console.log(`[${timestamp}] [FILE PROCESSOR] Already processing a file, skipping check`);
-      return;
-    }
-
-    try {
-      const patients = await patientService.getPatients();
-      const statusCounts = {
-        unprocessed: 0,
-        queued: 0,
-        processing: 0,
-        processed: 0,
-        error: 0,
-        total: 0
-      };
-      
-      for (const patient of patients) {
-        // Count files by status
-        patient.fileSet.forEach((file: MedicalDocument) => {
-          statusCounts.total++;
-          switch (file.status) {
-            case 'unprocessed':
-              statusCounts.unprocessed++;
-              break;
-            case 'queued':
-              statusCounts.queued++;
-              break;
-            case 'processing':
-              statusCounts.processing++;
-              break;
-            case 'processed':
-              statusCounts.processed++;
-              break;
-            case 'error':
-              statusCounts.error++;
-              break;
-          }
-        });
-
-        const unprocessedFiles = patient.fileSet.filter((file: MedicalDocument) => file.status === 'unprocessed');
-        
-        if (unprocessedFiles.length > 0) {
-          console.log(`[${timestamp}] [FILE PROCESSOR] Found ${unprocessedFiles.length} unprocessed files for patient ${patient.silknotePatientUuid}`);
-      
-          // Add unprocessed files to queue if not already there
-          unprocessedFiles.forEach((file: MedicalDocument) => {
-            if (!this.processingQueue.includes(file.clientFileId)) {
-              this.processingQueue.push(file.clientFileId);
-              console.log(`[${timestamp}] [FILE PROCESSOR] Added file ${file.clientFileId} to processing queue`);
-            }
-          });
-        }
-      }
-    } catch (error) {
-      console.log(`[${timestamp}] [FILE PROCESSOR] Error checking for unprocessed files:`, error);
-    }
-  }
-
-  private async processNextFile() {
-    if (this.processingQueue.length === 0 || this.isProcessing) {
-      return;
-    }
-
-    const fileId = this.processingQueue[0];
-    this.isProcessing = true;
-    console.log(`[${new Date().toISOString()}] [FILE PROCESSOR] Starting to process file: ${fileId}`);
-
-    try {
-      // Find the patient and file
-      const patients = await patientService.getPatients();
-      let targetPatient;
-      let targetFile;
-
-      for (const patient of patients) {
-        const file = patient.fileSet.find((f: MedicalDocument) => f.clientFileId === fileId);
-        if (file) {
-          targetPatient = patient;
-          targetFile = file;
-          break;
-        }
-      }
-    } catch (error) {
-      console.log(`[${new Date().toISOString()}] [FILE PROCESSOR] Error processing file ${fileId}:`, error);
-    } finally {
-      this.processingQueue.shift();
-      this.isProcessing = false;
-    }
-  }
+  // private async processNextFile() { // Unused
+  //   // ... logic ...
+  // }
 }
 
 // Initialize the singleton
@@ -378,4 +295,11 @@ export function emitProcessingComplete(silknotePatientUuid: string, processedCou
 
 export function emitFileDeleted(silknotePatientUuid: string, fileId: string) {
   emitToPatientRoom(silknotePatientUuid, "fileDeleted", { fileId });
+}
+
+// This function is intended for direct, ad-hoc processing outside the queue system.
+export async function processFileDirectly(_patientId: string, _fileId: string): Promise<void> {
+  // Placeholder for direct processing logic
+  // Example: const document = await storageService.getDocument(fileId);
+  // ... existing code ...
 }

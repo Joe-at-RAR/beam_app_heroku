@@ -54,7 +54,7 @@ export const socketAuth = () => {
  * Ensures users can only join rooms they have access to
  * Simplified to reduce excessive logging and checks
  */
-export const roomAuth = (socket: AuthenticatedSocket, room: string, next: (err?: Error) => void) => {
+export const roomAuth = (socket: AuthenticatedSocket, _room: string, next: (err?: Error) => void) => {
   try {
     // Skip in test environment
     if (process.env['NODE_ENV'] === 'test') {

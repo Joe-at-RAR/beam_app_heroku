@@ -207,7 +207,7 @@ export function createPrismaAdapter(): DatabaseAdapter {
 
             // Prepare data for Prisma `silknotePatientFileset` model
             const patientDbData = {
-                userId: silknoteUserUuid,
+                silknoteUserUuid: silknoteUserUuid,
                 patientName: patient.name,
                 patientDob: patient.dateOfBirth,
                 gender: patient.gender,
@@ -300,7 +300,7 @@ export function createPrismaAdapter(): DatabaseAdapter {
 
                 const result: PatientDetails = {
                     silknotePatientUuid: fileset.silknotePatientUuid,
-                    silknoteUserUuid: fileset.userId,
+                    silknoteUserUuid: fileset.silknoteUserUuid,
                     name: fileset.patientName || 'N/A',
                     dateOfBirth: fileset.patientDob || '', 
                     gender: fileset.gender || 'unknown',

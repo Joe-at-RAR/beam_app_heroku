@@ -1,4 +1,4 @@
-import { MedicalDocument, PatientDetails } from '@shared/types';
+import { MedicalDocument /*, PatientDetails*/ } from '@shared/types'; // Commented out PatientDetails
 
 export interface Patient {
   silknotePatientUuid: string;

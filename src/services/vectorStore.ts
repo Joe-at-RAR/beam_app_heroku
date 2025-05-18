@@ -5,7 +5,7 @@ import * as patientService from './patientService';
 import config from '../config';
 import { MedicalDocument } from '@shared/types';
 import { storageService } from '../utils/storage';
-import { createLogger } from '../utils/logger';
+// import { createLogger } from '../utils/logger'; // Unused import
 
 
 const openai = new AzureOpenAI({
@@ -15,7 +15,7 @@ const openai = new AzureOpenAI({
 });
 
 // Enhance the existing PatientVectorStore type with fileIdMappings
-declare module '../../../shared/vectorStore' {
+declare module '@shared/vectorStore' {
   interface PatientVectorStore {
     fileIdMappings?: Array<{
       openaiFileId: string;

@@ -1,13 +1,30 @@
-import { BlobServiceClient, ContainerClient } from '@azure/storage-blob';
+import { BlobServiceClient, BlockBlobClient, ContainerClient } from '@azure/storage-blob';
 import { FileStorageAdapter, StorageError } from '../storage-interfaces';
 import { RequestHandler } from 'express';
 import { createLogger } from '../logger'; // Assuming logger is in utils
 import config from '../../config'; // Added import for config
+import multer from 'multer';
+import { v4 as uuidv4 } from 'uuid'; // For generating unique blob names
+import path from 'path'; // For getting file extension
+
+// Extend Express.Multer.File interface to include our custom properties
+declare global {
+    namespace Express {
+        namespace Multer {
+            interface File {
+                etag?: string;
+                blobName?: string;
+                containerName?: string;
+            }
+        }
+    }
+}
+
+// const AZURE_STORAGE_CONNECTION_STRING = config.azure.azureOpenAI.key; // This seems incorrect, should be storage connection string // Commented out as unused and incorrect
 
 const logger = createLogger('AZURE_BLOB_ADAPTER');
 
 // Use config for connection string and container name
-const AZURE_STORAGE_CONNECTION_STRING = config.azure.azureOpenAI.key; // This seems incorrect, should be storage connection string
 // Corrected: const AZURE_STORAGE_CONNECTION_STRING = config.storage.connectionString; // Assuming it would be here
 // Actual from existing config.ts: AZURE_STORAGE_CONNECTION_STRING is not directly on config.storage, but rather parsedEnv.AZURE_STORAGE_CONNECTION_STRING
 // For now, let's assume it's already set in process.env as the config.ts logic makes it available to app but adapter read it directly.
@@ -52,7 +69,7 @@ export function createAzureBlobFileAdapter(): FileStorageAdapter {
         if (!containerClient) throw new Error('Azure Blob adapter not initialized.');
         const containerName = config.storage.azureContainerName; // Use from config
         logger.info(`Storing file "${filename}" in Azure Blob container "${containerName}".`);
-        const blockBlobClient = containerClient.getBlockBlobClient(filename);
+        const blockBlobClient: BlockBlobClient = containerClient.getBlockBlobClient(filename);
         try {
             await blockBlobClient.uploadData(fileBuffer);
             logger.info(`File "${filename}" uploaded successfully to Azure Blob.`);
@@ -67,7 +84,7 @@ export function createAzureBlobFileAdapter(): FileStorageAdapter {
         if (!containerClient) throw new Error('Azure Blob adapter not initialized.');
         const containerName = config.storage.azureContainerName; // Use from config
         logger.info(`Getting file content for "${fileRef}" from Azure Blob container "${containerName}".`);
-        const blockBlobClient = containerClient.getBlockBlobClient(fileRef);
+        const blockBlobClient: BlockBlobClient = containerClient.getBlockBlobClient(fileRef);
         try {
             const downloadBlockBlobResponse = await blockBlobClient.downloadToBuffer();
             logger.info(`File "${fileRef}" content retrieved successfully from Azure Blob.`);
@@ -85,7 +102,7 @@ export function createAzureBlobFileAdapter(): FileStorageAdapter {
         if (!containerClient) throw new Error('Azure Blob adapter not initialized.');
         const containerName = config.storage.azureContainerName; // Use from config
         logger.info(`Deleting file "${fileRef}" from Azure Blob container "${containerName}".`);
-        const blockBlobClient = containerClient.getBlockBlobClient(fileRef);
+        const blockBlobClient: BlockBlobClient = containerClient.getBlockBlobClient(fileRef);
         try {
             await blockBlobClient.delete();
             logger.info(`File "${fileRef}" deleted successfully from Azure Blob.`);
@@ -110,8 +127,8 @@ export function createAzureBlobFileAdapter(): FileStorageAdapter {
         // For now, let's assume it's a rename/copy within the container if needed.
         // A common pattern is to upload directly to the finalName.
         // If it's a copy and delete:
-        const sourceBlobClient = containerClient.getBlockBlobClient(tempPath);
-        const destBlobClient = containerClient.getBlockBlobClient(finalName);
+        const sourceBlobClient: BlockBlobClient = containerClient.getBlockBlobClient(tempPath);
+        const destBlobClient: BlockBlobClient = containerClient.getBlockBlobClient(finalName);
         try {
             const properties = await sourceBlobClient.getProperties();
             if (!properties.contentLength) {
@@ -128,32 +145,116 @@ export function createAzureBlobFileAdapter(): FileStorageAdapter {
         }
     };
 
-    // Multer middleware for Azure Blob would typically upload directly or use a streaming approach.
-    // This is a complex part if you want to avoid saving to local disk first.
-    // For a simpler version, you might use multer's memoryStorage or diskStorage
-    // and then call 'storeFile' with the buffer/filePath.
-    // Returning a placeholder that does nothing for now.
-    const createPdfUploadMiddleware = (tempDir: string): RequestHandler => {
-        logger.warn('createPdfUploadMiddleware for Azure Blob is not fully implemented and uses a placeholder. Files should be handled via API logic after standard multer parsing (e.g. memoryStorage).');
-        return (req, res, next) => {
-            // In a real scenario, this middleware might stream uploads to Azure
-            // or use multer.memoryStorage() and then the route handler calls storeFile.
-            // For now, just pass through.
-            next();
-        };
+    // Custom Multer storage engine for Azure Blob Storage
+    class AzureBlobMulterStorage implements multer.StorageEngine {
+        private containerClient: ContainerClient;
+
+        constructor(containerClient: ContainerClient) {
+            this.containerClient = containerClient;
+        }
+
+        _handleFile(_req: Express.  Request, file: Express.Multer.File, cb: (error?: any, info?: Partial<Express.Multer.File>) => void): void {
+            if (!this.containerClient) {
+                return cb(new Error('Azure Blob adapter not initialized or container client not available.'));
+            }
+
+            const extension = path.extname(file.originalname);
+            const blobName = `${uuidv4()}${extension}`;
+            const blockBlobClient: BlockBlobClient = this.containerClient.getBlockBlobClient(blobName);
+
+            logger.info(`Starting direct stream upload of ${file.originalname} as ${blobName} to Azure container ${this.containerClient.containerName}`);
+
+            blockBlobClient.uploadStream(file.stream)
+                .then(response => {
+                    logger.info(`Successfully streamed ${blobName} to Azure. ETag: ${response.etag}`);
+                    cb(null, {
+                        destination: this.containerClient.containerName, 
+                        filename: blobName, 
+                        path: `${this.containerClient.containerName}/${blobName}`, 
+                        etag: response.etag,
+                        blobName: blobName, 
+                        containerName: this.containerClient.containerName 
+                    });
+                })
+                .catch(error => {
+                    logger.error(`Error streaming ${blobName} to Azure:`, error);
+                    // Attempt to clean up if partial upload happened - this is complex with streams.
+                    // blockBlobClient.deleteIfExists().catch(delError => logger.error(`Cleanup error for ${blobName}:`, delError));
+                    cb(error);
+                });
+        }
+
+        _removeFile(_req: Express.Request, file: Express.Multer.File & { blobName?: string; containerName?: string }, cb: (error: Error | null) => void): void {
+            if (file.blobName && file.containerName) {
+                logger.info(`Attempting to remove blob ${file.blobName} from container ${file.containerName} due to error/rollback.`);
+                const blockBlobClient: BlockBlobClient = this.containerClient.getBlockBlobClient(file.blobName);
+                blockBlobClient.deleteIfExists()
+                    .then(() => {
+                        logger.info(`Successfully deleted ${file.blobName} during cleanup.`);
+                        cb(null);
+                    })
+                    .catch(error => {
+                        logger.error(`Error deleting ${file.blobName} during cleanup:`, error);
+                        cb(error);
+                    });
+            } else {
+                cb(null); // No specific blob to remove or info missing
+            }
+        }
+    }
+
+    // Multer middleware for Azure Blob.
+    // Uses a custom storage engine to stream directly to Azure Blob Storage.
+    const createPdfUploadMiddleware = (_tempDir: string): RequestHandler => {
+        if (!containerClient) {
+            // This check is important. Middleware might be created before initialize() is called or if it failed.
+            // Throw an error or return a middleware that sends an error response.
+            const msg = 'Azure Blob adapter not initialized. Cannot create upload middleware.';
+            logger.error(msg);
+            return (_req, _res, next) => next(new Error(msg));
+        }
+
+        const storage = new AzureBlobMulterStorage(containerClient);
+        
+        const upload = multer({
+            storage: storage, // Use our custom Azure storage engine
+            limits: {
+                fileSize: config.processing.maxFileSize, // Use from config
+            },
+            fileFilter: (_req, file, cb) => {
+                if (file.mimetype === 'application/pdf') {
+                    cb(null, true);
+                } else {
+                    logger.warn(`Attempted upload of non-PDF file: ${file.originalname} (${file.mimetype})`);
+                    cb(new Error('Only PDF files are allowed.'));
+                }
+            },
+        });
+
+        return upload.array('file', config.processing.maxFiles); 
     };
 
     // Optional: Implement if needed, requires PDF parsing library
-    const getPdfPageCount = async (fileRefOrPath: string): Promise<number> => {
-        logger.warn('getPdfPageCount for Azure Blob is not implemented.');
-        // This would involve fetching the PDF from Azure Blob (using getFileContent)
-        // and then using a library like pdf-lib or pdfjs-dist to parse it and get page count.
-        // For now, returning a placeholder.
-        // Example:
-        // const pdfBuffer = await getFileContent(fileRefOrPath);
-        // const pdfDoc = await PDFDocument.load(pdfBuffer);
-        // return pdfDoc.getPageCount();
-        throw new Error('getPdfPageCount not implemented for AzureBlobFileAdapter');
+    const getPdfPageCount = async (fileRef: string): Promise<number> => {
+        if (!containerClient) {
+            logger.error('Azure Blob adapter not initialized. Cannot get PDF page count.');
+            throw new Error('Azure Blob adapter not initialized.');
+        }
+        logger.info(`Getting PDF page count for Azure blob: ${fileRef}`);
+        try {
+            // Use the getFileContent method from the same adapter scope
+            const pdfBuffer = await getFileContent(fileRef);
+            const { PDFDocument } = await import('pdf-lib'); // Dynamic import
+            const pdfDoc = await PDFDocument.load(pdfBuffer);
+            const count = pdfDoc.getPageCount();
+            logger.info(`PDF page count for ${fileRef} is ${count}`);
+            return count;
+        } catch (error: any) {  
+            logger.error(`Failed to get PDF page count for Azure blob ${fileRef}:`, error);
+            // Depending on desired behavior, either re-throw or return a default (e.g., 0)
+            // Returning 0 to match LocalFileAdapter behavior on error
+            return 0; 
+        }
     };
 
     return {

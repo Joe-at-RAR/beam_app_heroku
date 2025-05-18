@@ -148,7 +148,7 @@ app.use(async (req: Request, res: Response, next: NextFunction) => {
 ////////////////////////////////////////////////////////////////
 
 // Handle Multer-specific errors
-app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
   if (err instanceof multer.MulterError) {
     // File size exceeded
     if (err.code === 'LIMIT_FILE_SIZE') {
@@ -193,7 +193,7 @@ app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
 });
 
 // Add a global error handler to log unhandled errors
-app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
   const timestamp = new Date().toISOString();
   console.error(`[${timestamp}] [GLOBAL ERROR HANDLER] Unhandled server error:`, {
     message: err.message,
@@ -246,7 +246,7 @@ app.use('/api/vector-search', vectorSearchRouter);
 app.use('/api/alerts', documentAlertsRouter);
 
 // Health check endpoint
-app.get('/health', (req: Request, res: Response) => {
+app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok' });
 });
 

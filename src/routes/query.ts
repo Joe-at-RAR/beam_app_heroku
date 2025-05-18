@@ -17,7 +17,7 @@ router.post('/', async (
   res: Response<QueryResponse>
 ) => {
   try {
-    const { query, clientFileIds, context } = req.body as QueryRequest;
+    const { query, clientFileIds } = req.body as QueryRequest;
 
     if (!query || !clientFileIds || !Array.isArray(clientFileIds)) {
       res.status(400).json({

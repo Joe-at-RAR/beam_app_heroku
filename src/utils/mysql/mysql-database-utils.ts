@@ -1,6 +1,6 @@
 import { Pool, RowDataPacket, ResultSetHeader, createPool } from 'mysql2/promise';
 import { DatabaseAdapter, StorageError } from '../storage-interfaces';
-import { MedicalDocument, PatientDetails, DocumentType } from '@shared/types'; // Assuming DocumentType is available
+import { MedicalDocument, PatientDetails, DocumentType, DocumentAlertType } from '@shared/types'; // Assuming DocumentType is available
 import { v4 as uuidv4 } from 'uuid'; // Needed for generating UUIDs if not done by DB
 import path from 'path'; // Import path
 
@@ -107,7 +107,65 @@ export function createMySqlDatabaseAdapter(): DatabaseAdapter {
       }
   }
 
-  return {
+  // --- Standalone Queue/VSRX Methods ---
+  async function getQueuedDocuments(limit: number = 10): Promise<string[]> {
+    if (!isInitialized) throw new Error('Adapter not initialized');
+    logInfo('Fetching queued document IDs', { limit });
+    const sql = "SELECT silknoteDocumentUuid FROM Document WHERE status = 'queued' ORDER BY createdAt ASC LIMIT ?";
+    try {
+      const rows = await executeQuery<RowDataPacket[]>(sql, [limit]);
+      return rows.map((row: RowDataPacket) => String(row['silknoteDocumentUuid']));
+    } catch (error) {
+      return [];
+    }
+  }
+
+  async function setDocumentStatus(silknoteDocumentUuid: string, status: string): Promise<boolean> {
+     if (!isInitialized) throw new Error('Adapter not initialized');
+     if (!silknoteDocumentUuid || !status) return false;
+     logInfo('Setting document status', { silknoteDocumentUuid, status });
+     const sql = 'UPDATE Document SET status = ?, updatedAt = NOW() WHERE silknoteDocumentUuid = ?';
+     try {
+         const result = await executeQuery<ResultSetHeader>(sql, [status, silknoteDocumentUuid]);
+         return result.affectedRows > 0;
+     } catch (error) {
+         return false;
+     }
+  }
+
+  async function resetProcessingDocuments(): Promise<number> {
+       if (!isInitialized) throw new Error('Adapter not initialized');
+       logInfo('Resetting processing documents');
+       const sql = "UPDATE Document SET status = 'queued', updatedAt = NOW() WHERE status = 'processing'";
+       try {
+           const result = await executeQuery<ResultSetHeader>(sql, []);
+           logInfo(`Reset ${result.affectedRows} documents.`);
+           return result.affectedRows;
+       } catch (error) {
+           return 0;
+       }
+   }
+
+   async function forceReprocessPatientDocuments(silknotePatientUuid: string): Promise<number> {
+      if (!isInitialized) throw new Error('Adapter not initialized');
+      if (!silknotePatientUuid) return 0;
+      logInfo('Forcing reprocess for patient documents', { silknotePatientUuid });
+      const sql = "UPDATE Document SET status = 'queued', updatedAt = NOW() WHERE patientUuid = ? AND status != 'queued'";
+      try {
+         const result = await executeQuery<ResultSetHeader>(sql, [silknotePatientUuid]);
+         logInfo(`Queued ${result.affectedRows} documents for reprocessing for patient ${silknotePatientUuid}.`);
+         return result.affectedRows;
+      } catch (error) {
+         return 0;
+      }
+   }
+
+   async function forceReprocessDocument(silknoteDocumentUuid: string): Promise<boolean> {
+      if (!isInitialized) throw new Error('Adapter not initialized');
+      return setDocumentStatus(silknoteDocumentUuid, 'queued'); // Now calls the standalone function
+   }
+
+  const adapter: DatabaseAdapter = {
     async initialize(): Promise<{success: boolean; errors: StorageError[]}> {
         if (isInitialized) return { success: true, errors: [] };
         logInfo('Initializing MySQL Adapter...');
@@ -350,62 +408,36 @@ export function createMySqlDatabaseAdapter(): DatabaseAdapter {
      },
       
      // --- Optional VSRX/Queue Methods ---
-      async getQueuedDocuments(limit: number = 10): Promise<string[]> {
+     // Referencing standalone functions defined above
+     getQueuedDocuments,
+     setDocumentStatus,
+     resetProcessingDocuments,
+     forceReprocessPatientDocuments,
+     forceReprocessDocument,
+
+     // --- Missing Methods Implementation (Stubbed) ---
+     async clearPatientCaseSummary(silknotePatientUuid: string): Promise<boolean> {
         if (!isInitialized) throw new Error('Adapter not initialized');
-        logInfo('Fetching queued document IDs', { limit });
-        const sql = "SELECT silknoteDocumentUuid FROM Document WHERE status = 'queued' ORDER BY createdAt ASC LIMIT ?";
-        try {
-          const rows = await executeQuery<RowDataPacket[]>(sql, [limit]);
-          // Ensure row['silknoteDocumentUuid'] is treated as string
-          return rows.map((row: RowDataPacket) => String(row['silknoteDocumentUuid'])); 
-        } catch (error) {
-          return [];
-        }
-      },
+        logInfo('clearPatientCaseSummary called, not implemented for MySQL yet', { silknotePatientUuid });
+        // TODO: Implement actual logic to clear case summary in MySQL
+        // For now, returning a success to match interface, assuming it could be a no-op or future feature
+        // Depending on requirements, this might involve setting a JSON field to null or deleting related records.
+        // Example: const sql = 'UPDATE PATIENT SET caseSummaryJson = NULL, summaryGenerationCount = 0 WHERE silknotePatientUuid = ?';
+        // await executeQuery<ResultSetHeader>(sql, [silknotePatientUuid]);
+        return Promise.resolve(false); // Or true if it's considered a success even if no-op
+     },
 
-      async setDocumentStatus(silknoteDocumentUuid: string, status: string): Promise<boolean> {
-         if (!isInitialized) throw new Error('Adapter not initialized');
-         if (!silknoteDocumentUuid || !status) return false;
-         logInfo('Setting document status', { silknoteDocumentUuid, status });
-         const sql = 'UPDATE Document SET status = ?, updatedAt = NOW() WHERE silknoteDocumentUuid = ?';
-         try {
-             const result = await executeQuery<ResultSetHeader>(sql, [status, silknoteDocumentUuid]);
-             return result.affectedRows > 0;
-         } catch (error) {
-             return false;
-         }
-      },
-
-      async resetProcessingDocuments(): Promise<number> {
-           if (!isInitialized) throw new Error('Adapter not initialized');
-           logInfo('Resetting processing documents');
-           const sql = "UPDATE Document SET status = 'queued', updatedAt = NOW() WHERE status = 'processing'";
-           try {
-               const result = await executeQuery<ResultSetHeader>(sql, []);
-               logInfo(`Reset ${result.affectedRows} documents.`);
-               return result.affectedRows;
-           } catch (error) {
-               return 0;
-           }
-       },
-
-       async forceReprocessPatientDocuments(silknotePatientUuid: string): Promise<number> {
-          if (!isInitialized) throw new Error('Adapter not initialized');
-          if (!silknotePatientUuid) return 0;
-          logInfo('Forcing reprocess for patient documents', { silknotePatientUuid });
-          const sql = "UPDATE Document SET status = 'queued', updatedAt = NOW() WHERE patientUuid = ? AND status != 'queued'";
-          try {
-             const result = await executeQuery<ResultSetHeader>(sql, [silknotePatientUuid]);
-             logInfo(`Queued ${result.affectedRows} documents for reprocessing for patient ${silknotePatientUuid}.`);
-             return result.affectedRows;
-          } catch (error) {
-             return 0;
-          }
-       },
-
-       async forceReprocessDocument(silknoteDocumentUuid: string): Promise<boolean> {
-          if (!isInitialized) throw new Error('Adapter not initialized');
-          return this.setDocumentStatus(silknoteDocumentUuid, 'queued');
-       }
+     async acknowledgeDocumentAlert(silknotePatientUuid: string, silknoteDocumentUuid: string, alertType: DocumentAlertType): Promise<boolean> {
+        if (!isInitialized) throw new Error('Adapter not initialized');
+        logInfo('acknowledgeDocumentAlert called, not implemented for MySQL yet', { silknotePatientUuid, silknoteDocumentUuid, alertType });
+        // TODO: Implement actual logic to acknowledge an alert in MySQL
+        // This would likely involve fetching the document's alertsJson, modifying it, and saving it back.
+        // 1. Fetch alertsJson from Document table for silknoteDocumentUuid
+        // 2. Parse JSON, find the alert by type, set its 'acknowledged' flag to true
+        // 3. Stringify the modified alerts back to JSON
+        // 4. Update the Document table with the new alertsJson
+        return Promise.resolve(false); // Or true, depending on desired behavior for non-implemented features
+     }
   };
+  return adapter;
 } 

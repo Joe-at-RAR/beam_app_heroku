@@ -10,15 +10,16 @@
     "dev": "tsc-watch --onSuccess \"node dist/src/index.js\"",
     "test": "jest",
     "prisma:generate": "prisma generate",
-    "heroku-postbuild": "pnpm run build && pnpm run prisma:generate"
+    "heroku-postbuild": "pnpm run prisma:generate && pnpm run build"
   },
   "dependencies": {
     "@azure/ai-form-recognizer": "^5.0.0",
     "@azure/core-auth": "^1.9.0",
     "@azure/openai": "^1.0.0-beta.11",
     "@azure/storage-blob": "^12.27.0",
-    "@prisma/client": "^5.1.1", 
+    "@prisma/client": "^5.1.1",
     "@types/nodemailer": "^6.4.14",
+    "@types/sharp": "^0.32.0",
     "axios": "^1.7.9",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
@@ -35,8 +36,10 @@
     "node-qpdf2": "^6.0.0",
     "openai": "4.68.4",
     "pdf-lib": "^1.17.1",
+    "pdf2pic": "^3.1.4",
     "prisma-field-encryption": "^1.6.0",
     "rate-limiter-flexible": "^5.0.5",
+    "sharp": "^0.34.1",
     "socket.io": "^4.8.1",
     "uuid": "^11.1.0",
     "zod": "^3.24.1",
@@ -59,4 +62,4 @@
     "tsx": "^4.7.0",
     "typescript": "^5.1.6"
   }
-} 
+}

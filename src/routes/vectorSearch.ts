@@ -4,7 +4,7 @@ import { Router } from 'express'
 import { AzureOpenAI } from 'openai'
 import config from '../config'
 import * as patientService from '../services/patientService'
-import { findEnhancedPrompt } from '../../../shared/query-mappings'
+import { findEnhancedPrompt } from '@shared/query-mappings'
 
 const router: Router = Router()
 
@@ -321,12 +321,14 @@ router.post('/:silknotePatientUuid/query-full', async (req, res) => {
 
     // Send the complete result as JSON
     res.json(result);
+    return;
 
   } catch (error) {
     console.error('[ROUTE - /query-full] Error processing full query:', error);
     res.status(500).json({ 
       error: error instanceof Error ? error.message : 'Internal server error' 
     });
+    return;
   }
 });
 

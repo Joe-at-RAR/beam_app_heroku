@@ -291,7 +291,7 @@ export const centralRateLimiter = {
           this.state.waitQueue.shift();
         } else {
           // Can't process yet, wait for token reset
-          const timeToReset = this.RESET_INTERVAL - (now - this.state.lastResetTime);
+        //  const timeToReset = this.RESET_INTERVAL - (now - this.state.lastResetTime);
         //  const waitTime = (timeToReset / 1000).toFixed(1);
        //   console.log(`[RL] Queue waiting: ${this.state.waitQueue.length} requests, reset in ${waitTime}s`);
         }
@@ -357,9 +357,9 @@ export const centralRateLimiter = {
     
     while (true) {
       try {
-        const startTime = Date.now();
+      //  const startTime = Date.now();
         const result = await operation();
-        const duration = Date.now() - startTime;
+       // const duration = Date.now() - startTime;
         
         //console.log(`[RL:${requestId}] Success: ${operationName} completed in ${duration}ms`);
         return result;

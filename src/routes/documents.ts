@@ -81,7 +81,8 @@ router.get('/:documentId', async (req, res) => {
     const stat = fs.statSync(filePath)
     console.log(`Streaming file [${path.basename(filePath)}] with size ${stat.size} bytes`)
   } catch (err) {
-    console.log('Error accessing file stats:', err)
+    console.log('Error accessing file stats for path:', filePath, err)
+    return res.status(500).send('Error accessing file information');
   }
   
   res.setHeader('Content-Type', 'application/pdf')
@@ -89,10 +90,13 @@ router.get('/:documentId', async (req, res) => {
   
   const stream = fs.createReadStream(filePath)
   stream.on('error', (err) => {
-    console.log('Error streaming file:', err)
-    res.status(500).send('Error streaming file')
+    console.log('Error streaming file:', filePath, err)
+    if (!res.headersSent) {
+        res.status(500).send('Error streaming file');
+    }
   })
-  stream.pipe(res)
+  stream.pipe(res);
+  return;
 })
 
 // DELETE /:documentId - Delete a document reference

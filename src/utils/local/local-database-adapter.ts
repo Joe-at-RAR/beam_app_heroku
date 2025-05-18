@@ -1,7 +1,7 @@
+import { DatabaseAdapter, StorageError } from '../storage-interfaces';
+import { MedicalDocument, PatientDetails /*, DocumentType*/ } from '@shared/types'; // DocumentType already commented
 import fs from 'fs/promises';
 import path from 'path';
-import { DatabaseAdapter, StorageError } from '../storage-interfaces';
-import { MedicalDocument, PatientDetails, DocumentType } from '@shared/types';
 
 // --- File Path Configuration ---
 const dataDir = path.resolve(__dirname, '..', '..', 'data'); 
@@ -11,9 +11,9 @@ const patientsFilePath = path.join(dataDir, 'patients.json');
 let patientsCache: { [key: string]: PatientDetails } = {};
 let isInitialized = false;
 
-// --- Logging Helpers ---
-function logInfo(message: string, data?: any): void {
- // console.log(`[LOCAL DB ADAPTER] INFO ${new Date().toISOString()} - ${message}`, data ?? '');
+// --- Logging Helpers (Simplified as they are unused) ---
+function logInfo(_message: string, _data?: any): void { // message and data already renamed
+  // console.log(`[LOCAL DB ADAPTER] INFO ${new Date().toISOString()} - ${message}`, data ?? '');
 }
 function logError(message: string, error?: Error | any, context?: any): void {
   const errorDetails = error instanceof Error ? { message: error.message, stack: error.stack } : error;
@@ -40,8 +40,66 @@ async function persistPatientsToFile(): Promise<boolean> {
 
 // --- Adapter Implementation ---
 export function createLocalDatabaseAdapter(): DatabaseAdapter {
-  return {
-    async initialize(): Promise<{ success: boolean; errors: StorageError[] }> {
+  const adapterFunctions: Partial<DatabaseAdapter> = {};
+
+  adapterFunctions.getDocument = async (documentId: string): Promise<MedicalDocument | null> => {
+    if (!isInitialized) throw new Error('Adapter not initialized');
+    logInfo(`Getting document ${documentId}`);
+    for (const patient of Object.values(patientsCache)) {
+      const doc = (patient.fileSet || []).find((f: MedicalDocument) => f.clientFileId === documentId || f.silknoteDocumentUuid === documentId);
+      if (doc) return doc as MedicalDocument;
+    }
+    return null;
+  };
+
+  adapterFunctions.saveDocument = async (document: MedicalDocument): Promise<boolean> => {
+    if (!isInitialized) throw new Error('Adapter not initialized');
+    const silknotePatientUuid = document.silknotePatientUuid;
+    const clientFileId = document.clientFileId;
+    if (!silknotePatientUuid || !clientFileId) {
+      logError('Cannot save document: missing silknotePatientUuid or clientFileId on the document object');
+      return false;
+    }
+    const patient = patientsCache[silknotePatientUuid];
+    if (!patient) {
+      logError(`Cannot save document: patient ${silknotePatientUuid} not found`);
+      return false;
+    }
+    logInfo(`Saving document ${clientFileId} for patient ${silknotePatientUuid}`);
+    patient.fileSet = patient.fileSet || [];
+    const existingIndex = patient.fileSet.findIndex((f: MedicalDocument) => f.clientFileId === clientFileId);
+    if (existingIndex > -1) {
+      document.silknotePatientUuid = silknotePatientUuid;
+      patient.fileSet[existingIndex] = document;
+    } else {
+      document.silknotePatientUuid = silknotePatientUuid;
+      patient.fileSet.push(document);
+    }
+    return persistPatientsToFile();
+  };
+
+  adapterFunctions.updateDocument = async (document: MedicalDocument): Promise<boolean> => {
+    if (!document.silknotePatientUuid) {
+      logError('Cannot update document: missing silknotePatientUuid');
+      return false;
+    }
+    if (!adapterFunctions.saveDocument) throw new Error('saveDocument is not defined on adapterFunctions');
+    return adapterFunctions.saveDocument(document);
+  };
+
+  adapterFunctions.setDocumentStatus = async (documentId: string, status: string): Promise<boolean> => {
+    logInfo(`setDocumentStatus (Local Adapter) for ${documentId} to ${status}`);
+    if (!adapterFunctions.getDocument || !adapterFunctions.updateDocument) throw new Error('getDocument or updateDocument is not defined on adapterFunctions');
+    const doc = await adapterFunctions.getDocument(documentId);
+    if(doc) {
+        doc.status = status;
+        return adapterFunctions.updateDocument(doc);
+    }
+    return false;
+  };
+
+  const adapter: DatabaseAdapter = {
+    initialize: async (): Promise<{ success: boolean; errors: StorageError[] }> => {
       if (isInitialized) {
         logInfo('Local DB Adapter already initialized.');
         return { success: true, errors: [] };
@@ -51,7 +109,6 @@ export function createLocalDatabaseAdapter(): DatabaseAdapter {
         await fs.mkdir(dataDir, { recursive: true });
         try {
           const data = await fs.readFile(patientsFilePath, 'utf-8');
-          // Parse into the cache which now expects PatientDetails
           patientsCache = JSON.parse(data) as { [key: string]: PatientDetails }; 
           logInfo(`Loaded ${Object.keys(patientsCache).length} patients from ${patientsFilePath}`);
         } catch (readError: any) {
@@ -81,25 +138,20 @@ export function createLocalDatabaseAdapter(): DatabaseAdapter {
         return { success: false, errors: [{ code: 'INIT_FAILED', message: error instanceof Error ? error.message : 'Unknown init error' }] };
       }
     },
-
-    // --- Patient Operations ---
-    async savePatient(patient: PatientDetails): Promise<boolean> {
+    savePatient: async (patient: PatientDetails): Promise<boolean> => {
       if (!isInitialized) throw new Error('Adapter not initialized');
-      // Use silknotePatientUuid exclusively as the primary key for the cache
       const silknotePatientUuid = patient.silknotePatientUuid;
       if (!silknotePatientUuid) {
          logError('Cannot save patient: missing silknotePatientUuid');
          return false;
       }
       logInfo(`Saving patient ${silknotePatientUuid}`);
-      // Safely handle vectorStore structure mismatch
-      let vectorStoreForCache: PatientDetails['vectorStore'] = null; // Use null instead of undefined
+      let vectorStoreForCache: PatientDetails['vectorStore'] = null; 
       if (patient.vectorStore) {
-        // Assume input might have vectorStoreIndex and map it
         const inputVectorStore = patient.vectorStore as any;
         vectorStoreForCache = {
             assistantId: inputVectorStore.assistantId || null,
-            vectorStoreIndex: inputVectorStore.vectorStoreIndex || null, // Use vectorStoreIndex
+            vectorStoreIndex: inputVectorStore.vectorStoreIndex || null, 
             assistantCreatedAt: inputVectorStore.assistantCreatedAt || new Date().toISOString(),
             assistantStatus: inputVectorStore.assistantStatus || 'unknown',
             processedFiles: inputVectorStore.processedFiles || [],
@@ -107,51 +159,43 @@ export function createLocalDatabaseAdapter(): DatabaseAdapter {
             fileIdMappings: inputVectorStore.fileIdMappings || []
         };
       }
-
       const patientToSave: PatientDetails = {
           silknotePatientUuid: silknotePatientUuid,
           name: patient.name || 'Unknown Name',
           dateOfBirth: patient.dateOfBirth || 'Unknown DOB',
-          gender: patient.gender || 'unknown', // Updated default
-          silknoteUserUuid: patient.silknoteUserUuid || 'Unknown User', // Added missing required field
+          gender: patient.gender || 'unknown', 
+          silknoteUserUuid: patient.silknoteUserUuid || 'Unknown User', 
           fileSet: patient.fileSet || [],
           vectorStore: vectorStoreForCache,
           caseSummary: patient.caseSummary || null,
-          summaryGenerationCount: patient.summaryGenerationCount || 0, // Ensure this is included
+          summaryGenerationCount: patient.summaryGenerationCount || 0, 
       };
       patientsCache[silknotePatientUuid] = patientToSave;
       return persistPatientsToFile();
     },
-
-    async getPatient(silknotePatientUuid: string): Promise<PatientDetails | null> { // Parameter name updated
+    getPatient: async (silknotePatientUuid: string): Promise<PatientDetails | null> => {
       if (!isInitialized) throw new Error('Adapter not initialized');
       logInfo(`Getting patient ${silknotePatientUuid}`);
       const patient = patientsCache[silknotePatientUuid] || null;
-      // Ensure fileSet is always an array
       if (patient && !Array.isArray(patient.fileSet)) {
          logInfo(`Patient ${silknotePatientUuid} fileSet is invalid, resetting to empty array.`);
          patient.fileSet = [];
       }
-      // Explicitly type the fileSet elements before returning
       if (patient && patient.fileSet) {
           patient.fileSet = patient.fileSet.map((doc: any) => doc as MedicalDocument);
       }
-      return patient; // Return the PatientDetails object directly
+      return patient;
     },
-
-    async getAllPatients(): Promise<PatientDetails[]> {
+    getAllPatients: async (): Promise<PatientDetails[]> => {
       if (!isInitialized) throw new Error('Adapter not initialized');
       logInfo('Getting all patients');
-      // Ensure fileSet is valid and typed for all patients returned
       return Object.values(patientsCache).map((p: PatientDetails) => ({
           ...p,
           fileSet: Array.isArray(p.fileSet) ? p.fileSet.map((doc: any) => doc as MedicalDocument) : []
       }));
     },
-
-    async updatePatient(patientUpdate: Partial<PatientDetails>): Promise<boolean> {
+    updatePatient: async (patientUpdate: Partial<PatientDetails>): Promise<boolean> => {
       if (!isInitialized) throw new Error('Adapter not initialized');
-      // Use only silknotePatientUuid
       const silknotePatientUuid = patientUpdate.silknotePatientUuid;
       if (!silknotePatientUuid) {
         logError('Cannot update patient: missing silknotePatientUuid');
@@ -159,109 +203,54 @@ export function createLocalDatabaseAdapter(): DatabaseAdapter {
       }
       if (!patientsCache[silknotePatientUuid]) {
         logError(`Cannot update patient: patient ${silknotePatientUuid} not found`);
-        return false; // Return false if patient not found
+        return false; 
       }
       logInfo(`Updating patient ${silknotePatientUuid}`);
       const existingPatient = patientsCache[silknotePatientUuid];
-      
-      // Safely handle vectorStore update
-      let updatedVectorStore: PatientDetails['vectorStore'] = existingPatient.vectorStore; // Initialize with existing
-      if ('vectorStore' in patientUpdate) { // Check if vectorStore is part of the update
-          if (patientUpdate.vectorStore === null) { // Check for explicit null
-             updatedVectorStore = null; // Set to null if update clears it
-          } else if (patientUpdate.vectorStore !== undefined) { // Process if it's not undefined
+      let updatedVectorStore: PatientDetails['vectorStore'] = existingPatient.vectorStore; 
+      if ('vectorStore' in patientUpdate) { 
+          if (patientUpdate.vectorStore === null) { 
+             updatedVectorStore = null; 
+          } else if (patientUpdate.vectorStore !== undefined) { 
               const inputVectorStore = patientUpdate.vectorStore as any;
               updatedVectorStore = {
-                 // Merge with existing or provide defaults
                 ...(existingPatient.vectorStore || {}),
                 ...patientUpdate.vectorStore,
-                // Ensure correct properties exist, use vectorStoreIndex
                 assistantId: inputVectorStore.assistantId ?? existingPatient.vectorStore?.assistantId ?? null,
-                vectorStoreIndex: inputVectorStore.vectorStoreIndex ?? existingPatient.vectorStore?.vectorStoreIndex ?? null, // Use vectorStoreIndex
+                vectorStoreIndex: inputVectorStore.vectorStoreIndex ?? existingPatient.vectorStore?.vectorStoreIndex ?? null, 
                 assistantCreatedAt: inputVectorStore.assistantCreatedAt ?? existingPatient.vectorStore?.assistantCreatedAt ?? new Date().toISOString(),
                 assistantStatus: inputVectorStore.assistantStatus ?? existingPatient.vectorStore?.assistantStatus ?? 'unknown',
                 processedFiles: inputVectorStore.processedFiles ?? existingPatient.vectorStore?.processedFiles ?? [],
                 lastUpdated: inputVectorStore.lastUpdated ?? new Date().toISOString(),
                 fileIdMappings: inputVectorStore.fileIdMappings ?? existingPatient.vectorStore?.fileIdMappings ?? []
               };
-          } // If patientUpdate.vectorStore is undefined, keep existing value
+          } 
       }
-      
       patientsCache[silknotePatientUuid] = {
         ...existingPatient,
         ...patientUpdate,
-        // Remove id field
         silknotePatientUuid: silknotePatientUuid,
         fileSet: Array.isArray(patientUpdate.fileSet) ? patientUpdate.fileSet : existingPatient.fileSet || [],
-        vectorStore: updatedVectorStore, // Use the safely merged vector store
+        vectorStore: updatedVectorStore, 
         silknoteUserUuid: patientUpdate.silknoteUserUuid ?? existingPatient.silknoteUserUuid,
       };
       return persistPatientsToFile();
     },
-
-    async deletePatient(silknotePatientUuid: string): Promise<boolean> { // Parameter name updated
+    deletePatient: async (silknotePatientUuid: string): Promise<boolean> => {
       if (!isInitialized) throw new Error('Adapter not initialized');
       if (!patientsCache[silknotePatientUuid]) {
         logInfo(`Patient ${silknotePatientUuid} not found for deletion.`);
-        return true; // Consider not found as success
+        return true; 
       }
       logInfo(`Deleting patient ${silknotePatientUuid}`);
       delete patientsCache[silknotePatientUuid];
       return persistPatientsToFile();
     },
-
-    // --- Document Operations ---
-    async saveDocument(document: MedicalDocument): Promise<boolean> {
-      if (!isInitialized) throw new Error('Adapter not initialized');
-      // Use silknotePatientUuid from the document for lookup
-      const silknotePatientUuid = document.silknotePatientUuid;
-      const clientFileId = document.clientFileId;
-      if (!silknotePatientUuid || !clientFileId) {
-        logError('Cannot save document: missing silknotePatientUuid or clientFileId on the document object');
-        return false;
-      }
-      const patient = patientsCache[silknotePatientUuid];
-      if (!patient) {
-        logError(`Cannot save document: patient ${silknotePatientUuid} not found`);
-        return false;
-      }
-      logInfo(`Saving document ${clientFileId} for patient ${silknotePatientUuid}`);
-      patient.fileSet = patient.fileSet || [];
-      // Explicitly type 'f' in findIndex
-      const existingIndex = patient.fileSet.findIndex((f: MedicalDocument) => f.clientFileId === clientFileId);
-      if (existingIndex > -1) {
-        // Ensure the document being saved has the correct silknotePatientUuid
-        document.silknotePatientUuid = silknotePatientUuid;
-        patient.fileSet[existingIndex] = document;
-      } else {
-         // Ensure the document being saved has the correct silknotePatientUuid
-        document.silknotePatientUuid = silknotePatientUuid;
-        patient.fileSet.push(document);
-      }
-      return persistPatientsToFile();
-    },
-
-    async getDocument(documentId: string): Promise<MedicalDocument | null> { // documentId is clientFileId or silknoteDocumentUuid
-      if (!isInitialized) throw new Error('Adapter not initialized');
-      logInfo(`Getting document ${documentId}`);
-      for (const patient of Object.values(patientsCache)) {
-        // Explicitly type 'f' in find
-        const doc = (patient.fileSet || []).find((f: MedicalDocument) => f.clientFileId === documentId || f.silknoteDocumentUuid === documentId);
-        if (doc) return doc as MedicalDocument;
-      }
-      return null;
-    },
-
-    async updateDocument(document: MedicalDocument): Promise<boolean> {
-      // Ensure silknotePatientUuid exists before attempting save
-       if (!document.silknotePatientUuid) {
-           logError('Cannot update document: missing silknotePatientUuid');
-           return false;
-       }
-      return this.saveDocument(document);
-    },
-
-    async deleteDocument(documentId: string): Promise<boolean> { // documentId is clientFileId or silknoteDocumentUuid
+    saveDocument: adapterFunctions.saveDocument!,
+    getDocument: adapterFunctions.getDocument!,
+    updateDocument: adapterFunctions.updateDocument!,
+    setDocumentStatus: adapterFunctions.setDocumentStatus!,
+    deleteDocument: async (documentId: string): Promise<boolean> => {
       if (!isInitialized) throw new Error('Adapter not initialized');
       logInfo(`Deleting document ${documentId}`);
       let modified = false;
@@ -269,49 +258,38 @@ export function createLocalDatabaseAdapter(): DatabaseAdapter {
         const patient = patientsCache[silknotePatientUuid];
         const initialLength = patient.fileSet?.length || 0;
         if (patient.fileSet) {
-          // Explicitly type 'f' in filter
           patient.fileSet = patient.fileSet.filter((f: MedicalDocument) => f.clientFileId !== documentId && f.silknoteDocumentUuid !== documentId);
           if (patient.fileSet.length < initialLength) {
             modified = true;
-            // No need to break, might be associated with multiple (though unlikely in this model)
           }
         }
       }
-      return modified ? persistPatientsToFile() : true; // Return true even if not found
+      return modified ? persistPatientsToFile() : true;
     },
-
-    // --- Relationship Operations ---
-    async addDocumentToPatient(silknotePatientUuid: string, document: MedicalDocument): Promise<boolean> { // Parameter name updated
+    addDocumentToPatient: async (silknotePatientUuid: string, document: MedicalDocument): Promise<boolean> => {
       if (!isInitialized) throw new Error('Adapter not initialized');
       const patient = patientsCache[silknotePatientUuid];
       if (!patient) {
         logError(`Cannot add document: patient ${silknotePatientUuid} not found`);
         return false;
       }
-      // Set the silknotePatientUuid field on the document to establish the link
       document.silknotePatientUuid = silknotePatientUuid;
-      // Remove the deprecated patientId field if it exists
-      // delete (document as any).patientId;
-      return this.saveDocument(document);
+      if (!adapterFunctions.saveDocument) throw new Error('saveDocument is not defined on adapterFunctions for addDocumentToPatient');
+      return adapterFunctions.saveDocument(document);
     },
-
-    async getDocumentsForPatient(silknotePatientUuid: string): Promise<MedicalDocument[]> { // Parameter name updated
+    getDocumentsForPatient: async (silknotePatientUuid: string): Promise<MedicalDocument[]> => {
       if (!isInitialized) throw new Error('Adapter not initialized');
       logInfo(`Getting documents for patient ${silknotePatientUuid}`);
       const patient = patientsCache[silknotePatientUuid];
-      // Ensure the returned documents are correctly typed
       return patient?.fileSet?.map((doc: any) => doc as MedicalDocument) || [];
     },
-
-    // --- Optional VSRX/Queue Methods ---
-    async getQueuedDocuments(limit: number = 10): Promise<string[]> {
-        logInfo('getQueuedDocuments (Local Adapter) - checking cache');
+    getQueuedDocuments: async (limit: number = 10): Promise<string[]> => {
+      logInfo('getQueuedDocuments (Local Adapter) - checking cache');
         const queuedIds: string[] = [];
         for (const patient of Object.values(patientsCache)) {
-            // Explicitly type doc
             for (const doc of (patient.fileSet || []).map(d => d as MedicalDocument)) {
                 if (doc.status === 'queued') {
-                    queuedIds.push(doc.clientFileId); // Use clientFileId
+                    queuedIds.push(doc.clientFileId); 
                     if (queuedIds.length >= limit) break;
                 }
             }
@@ -319,22 +297,12 @@ export function createLocalDatabaseAdapter(): DatabaseAdapter {
         }
         return queuedIds;
     },
-    async setDocumentStatus(documentId: string, status: string): Promise<boolean> {
-        logInfo(`setDocumentStatus (Local Adapter) for ${documentId} to ${status}`);
-        const doc = await this.getDocument(documentId);
-        if(doc) {
-            doc.status = status;
-            return this.updateDocument(doc);
-        }
-        return false;
-    },
-    async resetProcessingDocuments(): Promise<number> {
-        logInfo('resetProcessingDocuments (Local Adapter)');
+    resetProcessingDocuments: async (): Promise<number> => {
+      logInfo('resetProcessingDocuments (Local Adapter)');
         let count = 0;
         for (const patient of Object.values(patientsCache)) {
-             // Explicitly type doc
              (patient.fileSet || []).forEach((doc: MedicalDocument | any) => {
-                if(doc && doc.status === 'processing') { // Add null check for doc
+                if(doc && doc.status === 'processing') { 
                     doc.status = 'queued';
                     count++;
                 }
@@ -342,14 +310,13 @@ export function createLocalDatabaseAdapter(): DatabaseAdapter {
         }
         return count > 0 ? (await persistPatientsToFile() ? count : 0) : 0;
     },
-    async forceReprocessPatientDocuments(silknotePatientUuid: string): Promise<number> { // Parameter name updated
-        logInfo(`forceReprocessPatientDocuments (Local Adapter) for ${silknotePatientUuid}`);
+    forceReprocessPatientDocuments: async (silknotePatientUuid: string): Promise<number> => {
+      logInfo(`forceReprocessPatientDocuments (Local Adapter) for ${silknotePatientUuid}`);
         let count = 0;
         const patient = patientsCache[silknotePatientUuid];
         if (patient && Array.isArray(patient.fileSet)) {
-             // Explicitly type doc
              for (const doc of patient.fileSet.map(d => d as MedicalDocument)) {
-                 if (doc && doc.status !== 'queued') { // Add null check for doc
+                 if (doc && doc.status !== 'queued') { 
                     doc.status = 'queued';
                     count++;
                  }
@@ -357,8 +324,43 @@ export function createLocalDatabaseAdapter(): DatabaseAdapter {
         }
         return count > 0 ? (await persistPatientsToFile() ? count : 0) : 0;
     },
-    async forceReprocessDocument(documentId: string): Promise<boolean> {
-        return this.setDocumentStatus(documentId, 'queued');
+    forceReprocessDocument: async (documentId: string): Promise<boolean> => {
+      if (!adapterFunctions.setDocumentStatus) throw new Error('setDocumentStatus is not defined on adapterFunctions for forceReprocessDocument');
+      return adapterFunctions.setDocumentStatus(documentId, 'queued');
+    },
+    clearPatientCaseSummary: async (silknotePatientUuid: string): Promise<boolean> => {
+        logInfo(`clearPatientCaseSummary called for ${silknotePatientUuid}, not fully implemented in local adapter yet.`);
+        const patient = await adapter.getPatient!(silknotePatientUuid);
+        if (patient) {
+            patient.caseSummary = null;
+            patient.summaryGenerationCount = 0;
+            return adapter.savePatient!(patient);
+        }
+        return false;
+    },
+    acknowledgeDocumentAlert: async (silknotePatientUuid: string, silknoteDocumentUuid: string, alertType: any): Promise<boolean> => {
+        logInfo(`acknowledgeDocumentAlert called for patient ${silknotePatientUuid}, doc ${silknoteDocumentUuid}, type ${alertType}. Not fully implemented.`);
+        const patient = await adapter.getPatient!(silknotePatientUuid);
+        if (patient) {
+            const doc = patient.fileSet.find(d => d.silknoteDocumentUuid === silknoteDocumentUuid || d.clientFileId === silknoteDocumentUuid);
+            if (doc && doc.alerts) {
+                let changed = false;
+                doc.alerts = doc.alerts.map(alert => {
+                    if (alert.type === alertType && !alert.acknowledged) {
+                        changed = true;
+                        return { ...alert, acknowledged: true };
+                    }
+                    return alert;
+                });
+                if (changed) {
+                    return adapter.saveDocument!(doc);
+                }
+                return true; 
+            }
+        }
+        return false;
     }
   };
+  // Ensure all methods from DatabaseAdapter are implemented on adapter by this point
+  return adapter as DatabaseAdapter;
 } 

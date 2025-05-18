@@ -68,7 +68,7 @@ export function debugError(error: any, context: Record<string, any> = {}) {
  * Use this middleware to diagnose 500 errors in specific routes
  */
 export function errorDiagnostics(endpoint: string) {
-  return async (req: any, res: any, next: any) => {
+  return async (req: any, _res: any, next: any) => {
     try {
       // Log the request
       console.log(`\n=== DIAGNOSTIC REQUEST TO ${endpoint} ===`);
@@ -94,5 +94,13 @@ export function errorDiagnostics(endpoint: string) {
       // Pass to error handler
       next(error);
     }
+  };
+}
+
+// Middleware to log all headers
+export function logAllHeadersMiddleware() {
+  return async (req: any, _res: any, next: any) => {
+    console.log('Headers:', req.headers);
+    next();
   };
 } 
