@@ -1,5 +1,5 @@
 import { io } from '../socket'
-import { MedicalDocument, DocumentType, PatientDetails, DocumentAlert, DocumentAlertType } from '@shared/types'
+import { MedicalDocument, DocumentType, PatientDetails, DocumentAlert, DocumentAlertType } from '../shared/types'
 import { analyzeDocument } from './documentAnalyzer'
 import { centralRateLimiter } from './centralRateLimiter'
 import * as patientService from './patientService'

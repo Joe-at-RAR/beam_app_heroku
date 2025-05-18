@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import * as userService from '../services/userService';
-import { UserDetails } from '@shared/types';
+import { UserDetails } from '../shared/types';
 
 const router: Router = Router();
 

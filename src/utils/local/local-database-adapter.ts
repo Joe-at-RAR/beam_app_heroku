@@ -1,5 +1,5 @@
 import { DatabaseAdapter, StorageError } from '../storage-interfaces';
-import { MedicalDocument, PatientDetails /*, DocumentType*/ } from '@shared/types'; // DocumentType already commented
+import { MedicalDocument, PatientDetails, DocumentAlert, DocumentAlertType } from '../../shared/types'; // DocumentType already commented, Added DocumentAlert, DocumentAlertType
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -148,17 +148,19 @@ export function createLocalDatabaseAdapter(): DatabaseAdapter {
       logInfo(`Saving patient ${silknotePatientUuid}`);
       let vectorStoreForCache: PatientDetails['vectorStore'] = null; 
       if (patient.vectorStore) {
-        const inputVectorStore = patient.vectorStore as any;
+        const inputVectorStore = patient.vectorStore;
         vectorStoreForCache = {
-            assistantId: inputVectorStore.assistantId || null,
-            vectorStoreIndex: inputVectorStore.vectorStoreIndex || null, 
+            assistantId: inputVectorStore.assistantId || '',
+            vectorStoreIndex: inputVectorStore.vectorStoreIndex || '', 
             assistantCreatedAt: inputVectorStore.assistantCreatedAt || new Date().toISOString(),
-            assistantStatus: inputVectorStore.assistantStatus || 'unknown',
+            assistantStatus: inputVectorStore.assistantStatus || 'ready', // Default to 'ready' or handle appropriately
             processedFiles: inputVectorStore.processedFiles || [],
-            lastUpdated: inputVectorStore.lastUpdated || new Date().toISOString(),
-            fileIdMappings: inputVectorStore.fileIdMappings || []
+            lastUpdated: inputVectorStore.lastUpdated || new Date().toISOString()
+            // fileIdMappings removed
         };
       }
+
+      
       const patientToSave: PatientDetails = {
           silknotePatientUuid: silknotePatientUuid,
           name: patient.name || 'Unknown Name',
@@ -216,13 +218,13 @@ export function createLocalDatabaseAdapter(): DatabaseAdapter {
               updatedVectorStore = {
                 ...(existingPatient.vectorStore || {}),
                 ...patientUpdate.vectorStore,
-                assistantId: inputVectorStore.assistantId ?? existingPatient.vectorStore?.assistantId ?? null,
-                vectorStoreIndex: inputVectorStore.vectorStoreIndex ?? existingPatient.vectorStore?.vectorStoreIndex ?? null, 
+                assistantId: inputVectorStore.assistantId ?? existingPatient.vectorStore?.assistantId ?? '',
+                vectorStoreIndex: inputVectorStore.vectorStoreIndex ?? existingPatient.vectorStore?.vectorStoreIndex ?? '', 
                 assistantCreatedAt: inputVectorStore.assistantCreatedAt ?? existingPatient.vectorStore?.assistantCreatedAt ?? new Date().toISOString(),
-                assistantStatus: inputVectorStore.assistantStatus ?? existingPatient.vectorStore?.assistantStatus ?? 'unknown',
+                assistantStatus: inputVectorStore.assistantStatus ?? existingPatient.vectorStore?.assistantStatus ?? 'ready', // Default to 'ready'
                 processedFiles: inputVectorStore.processedFiles ?? existingPatient.vectorStore?.processedFiles ?? [],
-                lastUpdated: inputVectorStore.lastUpdated ?? new Date().toISOString(),
-                fileIdMappings: inputVectorStore.fileIdMappings ?? existingPatient.vectorStore?.fileIdMappings ?? []
+                lastUpdated: inputVectorStore.lastUpdated ?? new Date().toISOString()
+                // fileIdMappings removed
               };
           } 
       }
@@ -338,14 +340,14 @@ export function createLocalDatabaseAdapter(): DatabaseAdapter {
         }
         return false;
     },
-    acknowledgeDocumentAlert: async (silknotePatientUuid: string, silknoteDocumentUuid: string, alertType: any): Promise<boolean> => {
+    acknowledgeDocumentAlert: async (silknotePatientUuid: string, silknoteDocumentUuid: string, alertType: DocumentAlertType): Promise<boolean> => {
         logInfo(`acknowledgeDocumentAlert called for patient ${silknotePatientUuid}, doc ${silknoteDocumentUuid}, type ${alertType}. Not fully implemented.`);
         const patient = await adapter.getPatient!(silknotePatientUuid);
         if (patient) {
-            const doc = patient.fileSet.find(d => d.silknoteDocumentUuid === silknoteDocumentUuid || d.clientFileId === silknoteDocumentUuid);
+            const doc = patient.fileSet.find((d: MedicalDocument) => d.silknoteDocumentUuid === silknoteDocumentUuid || d.clientFileId === silknoteDocumentUuid);
             if (doc && doc.alerts) {
                 let changed = false;
-                doc.alerts = doc.alerts.map(alert => {
+                doc.alerts = doc.alerts.map((alert: DocumentAlert) => {
                     if (alert.type === alertType && !alert.acknowledged) {
                         changed = true;
                         return { ...alert, acknowledged: true };

@@ -1,6 +1,6 @@
 // server/src/types/vectorStore.ts
 
-import type { MedicalDocument } from '@shared/types';
+import type { MedicalDocument } from '../shared/types';
 
 
 // @shared/types.ts

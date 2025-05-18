@@ -1,8 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "ESNext", 
-    "moduleResolution": "node",
+  "module": "CommonJS",
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "strict": true,
@@ -17,7 +16,7 @@
     "forceConsistentCasingInFileNames": true,
     "baseUrl": "./src",
     "paths": {
-      "@shared/*": ["shared/*"] 
+      "@shared/*": ["src/shared/*"] 
     },
     "composite": true,
     "declaration": true,
@@ -25,7 +24,6 @@
     "sourceMap": true,
     "skipLibCheck": true,
     "outDir": "./dist",
-    "rootDir": "./src", 
     "lib": ["ES2022"],
     "types": ["node"], 
     "typeRoots": [
@@ -34,8 +32,6 @@
     ]
   },
   "include": [ 
-    "shared/**/*.ts",
-
     "src/**/*.ts"
   ],
   "exclude": [

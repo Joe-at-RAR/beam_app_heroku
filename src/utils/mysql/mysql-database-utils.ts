@@ -1,6 +1,6 @@
 import { Pool, RowDataPacket, ResultSetHeader, createPool } from 'mysql2/promise';
 import { DatabaseAdapter, StorageError } from '../storage-interfaces';
-import { MedicalDocument, PatientDetails, DocumentType, DocumentAlertType } from '@shared/types'; // Assuming DocumentType is available
+import { MedicalDocument, PatientDetails, DocumentType, DocumentAlertType } from '../../shared/types'; // Assuming DocumentType is available
 import { v4 as uuidv4 } from 'uuid'; // Needed for generating UUIDs if not done by DB
 import path from 'path'; // Import path
 
@@ -341,7 +341,7 @@ export function createMySqlDatabaseAdapter(): DatabaseAdapter {
             // Use bracket notation for row access
             const patientPromises = rows.map(row => this.getPatient(row['silknotePatientUuid'])); 
             const patients = await Promise.all(patientPromises);
-            return patients.filter((p): p is PatientDetails => p !== null);
+            return patients.filter((p: PatientDetails | null): p is PatientDetails => p !== null);
         } catch (error) {
             return [];
         }

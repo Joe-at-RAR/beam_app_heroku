@@ -4,7 +4,7 @@ import { Router } from 'express'
 import { AzureOpenAI } from 'openai'
 import config from '../config'
 import * as patientService from '../services/patientService'
-import { findEnhancedPrompt } from '@shared/query-mappings'
+import { findEnhancedPrompt } from '../shared/query-mappings'
 
 const router: Router = Router()
 

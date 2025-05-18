@@ -2,11 +2,11 @@ import { Router } from "express";
 import { getPatientById, updatePatient } from "../services/patientService";
 import { AzureOpenAI } from 'openai';
 import * as patientService from '../services/patientService';
-import {  CaseSummaryType, parseCaseSummary } from "@shared/case-summary-types";
+import {  CaseSummaryType, parseCaseSummary } from "../shared/case-summary-types";
 import { asyncHandler } from "../utils/errorHandlers";
 import { Request, Response } from "express";
-import { errorDiagnostics } from "../utils/debug";
-import { CaseSummaryApiResponse as SharedCaseSummaryApiResponse, SummaryCitation } from '@shared/types';
+// import { errorDiagnostics } from "../utils/debug";
+import { CaseSummaryApiResponse as SharedCaseSummaryApiResponse, SummaryCitation } from '../shared/types';
 import { createLogger } from '../utils/logger'
 import config from '../config';
 import { randomUUID } from "crypto";
@@ -14,8 +14,8 @@ import { storageService } from "../utils/storage";
 const logger = createLogger('CASE_SUMMARY')
 const router: Router = Router();
 
-// Apply diagnostics middleware to all case summary routes
-router.use(errorDiagnostics('case-summary'));
+// // Apply diagnostics middleware to all case summary routes
+// router.use(errorDiagnostics('case-summary'));
 
 // GET existing case summary for a patient (retrieve only, without generating)
 router.get('/retrieve/:silknotePatientUuid', asyncHandler(async (req: Request, res: Response) => {

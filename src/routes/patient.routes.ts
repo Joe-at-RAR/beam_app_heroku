@@ -3,7 +3,7 @@ import fs from 'fs'
 import path from 'path'
 
 import config from '../config'
-import { MedicalDocument, DocumentType, PatientDetails, DocumentAlertType } from '@shared/types'
+import { MedicalDocument, DocumentType, PatientDetails, DocumentAlertType } from '../shared/types'
 import { documentService } from '../services/documentService'
 import * as patientService from '../services/patientService'
 import { io } from '../socket'

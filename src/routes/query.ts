@@ -1,7 +1,7 @@
 import type { Request, Response, Router as ExpressRouter } from 'express';
 import { Router } from 'express';
 // import { processQuery } from './query/query-processor.js';
-import type { QueryRequest } from '@shared/types';
+import type { QueryRequest } from '../shared/types';
 import config from '../config.js';
 
 const router: ExpressRouter = Router();

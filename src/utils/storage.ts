@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import config from '../config';
-import { MedicalDocument, DocumentType } from '@shared/types';
+import { MedicalDocument, DocumentType } from '../shared/types';
 import { RequestHandler } from 'express';
 import { StorageError, FileStorageAdapter, DatabaseAdapter } from './storage-interfaces';
 import { createLocalFileAdapter } from './local/local-file-adapter';

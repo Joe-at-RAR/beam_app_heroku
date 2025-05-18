@@ -3,12 +3,12 @@ import {
     BaseDocIntelResult,
     BaseLLMResult,
     DocumentType
-} from '@shared/types';
+} from '../shared/types';
 import { Readable } from 'stream';
 import { z } from 'zod'
 import { documentSchemas } from '../types/schemas';
-import type { DocumentPage } from '@shared/azure-types';
-import type { PatientDetails } from '@shared/types';
+import type { DocumentPage } from '../shared/azure-types';
+import type { PatientDetails } from '../shared/types';
 
 export interface DocumentHandler {
     canHandle(mimeType: string): boolean;

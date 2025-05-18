@@ -52,7 +52,7 @@ import {
   AnalyzeResult, 
   DocumentPage} from '@azure/ai-form-recognizer';
 import config from '../config';
-import { MedicalDocument, AnalyzerInput, DocumentType, EnrichedExtraction } from '@shared/types';
+import { MedicalDocument, AnalyzerInput, DocumentType, EnrichedExtraction } from '../shared/types';
 import { 
   // PageExtractionSchema, // Commented out as unused in active code
   PageExtractionSchemaPart1, 
@@ -60,7 +60,7 @@ import {
   PageExtractionSchemaPart3,
   PageExtractionSchemaPart4,
   combineExtractionParts 
-} from '@shared/extraction-schema';
+} from '../shared/extraction-schema';
 import { processExtraction, aggregateExtractions } from './analyzer/enrich-extraction';
 import { centralRateLimiter } from './centralRateLimiter';
 import zodToJsonSchema from 'zod-to-json-schema';

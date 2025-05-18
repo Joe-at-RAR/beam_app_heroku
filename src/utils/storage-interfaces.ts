@@ -1,4 +1,4 @@
-import { MedicalDocument, PatientDetails, DocumentAlertType } from '@shared/types';
+import { MedicalDocument, PatientDetails, DocumentAlertType } from '../shared/types';
 import { RequestHandler } from 'express';
 
 /**

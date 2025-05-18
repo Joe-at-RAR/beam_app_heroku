@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 import { asyncHandler } from "../utils/errorHandlers";
 import { storageService } from "../utils/storage";
 import { createLogger } from '../utils/logger';
-import { DocumentAlertType } from '@shared/types'; // Import the enum/type
+import { DocumentAlertType } from '../shared/types'; // Import the enum/type
 
 const logger = createLogger('DOCUMENT_ALERTS');
 const router: Router = Router();

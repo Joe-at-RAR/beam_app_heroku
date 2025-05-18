@@ -1,4 +1,4 @@
-import type { EnrichedExtraction, EnrichedField, EnrichedExtractionPosition } from '@shared/types'
+import type { EnrichedExtraction, EnrichedField, EnrichedExtractionPosition } from '../../shared/types'
 import type { AnalyzeResult, DocumentPage } from '@azure/ai-form-recognizer'
 
 // Returns a bounding box given a polygon array.

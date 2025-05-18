@@ -1,7 +1,7 @@
 import { PrismaClient, Prisma } from '@prisma/client';
 import { DatabaseAdapter, StorageError } from '../storage-interfaces';
-import { MedicalDocument, PatientDetails, DocumentType, DocumentAlert, DocumentAlertType, CaseSummaryApiResponse } from '@shared/types';
-import { parseCaseSummary } from '@shared/case-summary-types';
+import { MedicalDocument, PatientDetails, DocumentType, DocumentAlert, DocumentAlertType, CaseSummaryApiResponse } from '../../shared/types';
+import { parseCaseSummary } from '../../shared/case-summary-types';
 import { v4 as uuidv4 } from 'uuid'; // Needed for generating UUIDs if not provided by DB
 
 // --- Logging Helpers ---

@@ -1,4 +1,4 @@
-import { PatientDetails, MedicalDocument } from '@shared/types';
+import { PatientDetails, MedicalDocument } from '../shared/types';
 import { io } from '../socket';
 import { storageService } from '../utils/storage'; // Use storageService
 import { AzureOpenAI } from 'openai';

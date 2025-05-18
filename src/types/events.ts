@@ -1,4 +1,4 @@
-import { MedicalDocument } from '@shared/types';
+import { MedicalDocument } from '../shared/types';
 import { SocketErrorCode } from '../middleware/error-handler';
 import { DisconnectReason } from 'socket.io';
 

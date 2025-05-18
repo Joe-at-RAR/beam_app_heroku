@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import * as patientService from './patientService';
 import { io } from '../socket';
-import { MedicalDocument, DocumentType, PatientDetails } from '@shared/types';
+import { MedicalDocument, DocumentType, PatientDetails } from '../shared/types';
 import { SupportedMimeType } from '../utils/handler-types';
 
 interface ProcessingFile extends MedicalDocument {
