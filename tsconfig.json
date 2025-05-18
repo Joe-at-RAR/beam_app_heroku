@@ -15,7 +15,7 @@
     "resolveJsonModule": true,
     "isolatedModules": true, 
     "forceConsistentCasingInFileNames": true,
-    "baseUrl": ".",
+    "baseUrl": "./src",
     "paths": {
       "@shared/*": ["shared/*"] 
     },
@@ -25,7 +25,7 @@
     "sourceMap": true,
     "skipLibCheck": true,
     "outDir": "./dist",
-    "rootDir": ".", 
+    "rootDir": "./src", 
     "lib": ["ES2022"],
     "types": ["node"], 
     "typeRoots": [
@@ -33,9 +33,10 @@
       "./src/types"
     ]
   },
-  "include": [
-    "src/**/*.ts",
-    "shared/**/*.ts"
+  "include": [ 
+    "shared/**/*.ts",
+
+    "src/**/*.ts"
   ],
   "exclude": [
     "node_modules",
