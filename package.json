@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "description": "Server for Beam application",
   "type": "module",
-  "main": "dist/src/index.js",
+  "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/src/index.js",
-    "dev": "tsc-watch --onSuccess \"node dist/src/index.js\"",
+    "start": "node dist/index.js",
+    "dev": "tsc-watch --onSuccess \"node dist/index.js\"",
     "test": "jest",
     "prisma:generate": "prisma generate",
     "heroku-postbuild": "pnpm run prisma:generate && pnpm run build"
