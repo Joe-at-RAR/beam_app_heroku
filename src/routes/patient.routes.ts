@@ -277,8 +277,29 @@ router.post('/:silknotePatientUuid/process', (req, res, next) => storageService.
         console.log(`[PROCESS] Document queued for processing: ${clientFileId}`);
         
         medicalDocuments.push(document);
-      } catch (fileError) {
-        console.error(`Error processing file ${file.originalname}:`, fileError);
+      } catch (fileError: any) {
+        // ---------------------------------------------------------
+        // Comprehensive error diagnostics
+        // ---------------------------------------------------------
+        const detailedError = {
+          file: file.originalname,
+          clientFileId,
+          type: fileError && fileError.constructor ? fileError.constructor.name : typeof fileError,
+          message: fileError instanceof Error ? fileError.message : String(fileError),
+          stack: fileError instanceof Error ? (fileError.stack || 'no-stack') : 'non-error',
+          raw: fileError
+        };
+
+        console.error('[PROCESS] 🛑 Failed processing file', JSON.stringify(detailedError, null, 2));
+
+        // Emit a socket event so the frontend knows it failed
+        emitToPatientRoom(silknotePatientUuid, 'fileStatus', {
+          clientFileId,
+          silknotePatientUuid,
+          status: 'error',
+          stage: 'processing_failed',
+          error: detailedError.message
+        });
       }
     }
     
