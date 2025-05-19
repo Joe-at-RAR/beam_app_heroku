@@ -298,6 +298,7 @@ router.post(
         }
       })(); // fire-and-forget
     }
+    return; // Explicitly return after initiating background work
   }
 );
 
