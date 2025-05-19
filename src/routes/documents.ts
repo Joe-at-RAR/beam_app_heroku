@@ -5,6 +5,7 @@ import { documentService } from '../services/documentService'
 import { storageService } from "../utils/storage";
 import { asyncHandler } from "../utils/errorHandlers";
 import { createLogger } from '../utils/logger';
+import config from '../config';
 
 const logger = createLogger('DOCUMENTS_ROUTE')
 const router:Router = Router()
@@ -62,7 +63,6 @@ router.get('/:id/details', async (req, res) => {
 router.get('/:documentId', async (req, res) => {
     console.log(`[DOCUMENTS ROUTES] Fetching document: ${req.params.documentId}`)
   const { documentId } = req.params
-  // Decode the documentId to correctly handle spaces and other encoded characters
   const decodedDocumentId = decodeURIComponent(documentId)
   
   const documentRecord = await documentService.getDocumentById(decodedDocumentId)
@@ -72,6 +72,19 @@ router.get('/:documentId', async (req, res) => {
   }
   
   const filePath = documentRecord.storedPath
+  // --- If we are in SILKNOTE (Azure Blob) mode ---
+  if (config.storage.type !== 'LOCAL') {
+    try {
+      const buffer = await storageService.getFileContent(filePath)
+      res.setHeader('Content-Type', 'application/pdf')
+      res.setHeader('Content-Disposition', `inline; filename="${documentRecord.originalName || path.basename(filePath)}"`)
+      return res.end(buffer)
+    } catch (err) {
+      console.log('Error retrieving blob for path:', filePath, err)
+      return res.status(404).send('Stored file not found in blob storage')
+    }
+  }
+  // --- LOCAL (VSRX) mode ---
   if (!filePath || !fs.existsSync(filePath)) {
     console.log('Stored file not found at:', filePath)
     return res.status(404).send('Stored file not found')
