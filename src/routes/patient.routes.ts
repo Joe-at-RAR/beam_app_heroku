@@ -16,6 +16,48 @@ const router: Router = Router()
 
 const logger = createLogger('PATIENT_ROUTES');
 
+async function quickStore(
+  file: Express.Multer.File,
+  clientFileId: string,
+  patient: PatientDetails // Make sure PatientDetails is imported or defined
+): Promise<MedicalDocument> {
+  // 1. move blob to its final name
+  const storedPath = await storageService.finalizeUploadedFile(file.path, clientFileId);
+
+  // 2. stub MedicalDocument – omit pageCount for now
+  const doc: MedicalDocument = {
+    clientFileId,
+    silknotePatientUuid: patient.silknotePatientUuid,
+    originalName: file.originalname,
+    storedPath,
+    status: 'stored',
+    category: DocumentType.UNPROCESSED,
+    uploadDate: new Date().toISOString(),
+    type: 'application/pdf',
+    size: file.size,
+    title: file.originalname,
+    format: { mimeType: 'application/pdf', extension: 'pdf' },
+    fileSize: file.size,
+    filename: path.basename(storedPath),
+    pageCount: 0, // Placeholder
+    content: { analysisResult: null, extractedSchemas: [], enrichedSchemas: [], pageImages: [] },
+    confidence: 0
+  };
+
+  // 3. put stub in DB
+  await patientService.addFileToPatient(patient.silknotePatientUuid, doc);
+
+  // 4. socket "stored"
+  emitToPatientRoom(patient.silknotePatientUuid, 'fileStatus', {
+    clientFileId,
+    silknotePatientUuid: patient.silknotePatientUuid,
+    status: 'stored',
+    stage: 'storage_complete'
+  });
+
+  return doc;
+}
+
 // GET / - fetch all patients
 router.get('/', async (req, res) => {
   try {
@@ -162,160 +204,97 @@ function emitToPatientRoom(silknotePatientUuid: string, event: string, data: any
 }
 
 // POST /:silknotePatientUuid/process - handle file upload with multer
-router.post('/:silknotePatientUuid/process', (req, res, next) => storageService.createPdfUploadMiddleware()(req, res, next), async (req, res) => {
-  try {
-    // Log basic information about the request
-    console.log('Document upload request received');
-    console.log('Content-Type:', req.headers['content-type']);
-    console.log('Files received:', req.files ? (Array.isArray(req.files) ? req.files.length : 1) : 0);
-    
-    const silknotePatientUuid = req.params['silknotePatientUuid'];
-    const uploadedFiles = req.files as Express.Multer.File[];
-    const clientFileIds = req.body.clientFileId || [];
-    
-    // Access the uploaded files
-    if (!uploadedFiles || uploadedFiles.length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'No files were uploaded'
-      });
+router.post(
+  '/:silknotePatientUuid/process',
+  (req, res, next) => storageService.createPdfUploadMiddleware()(req, res, next),
+  async (req, res) => {
+    const silknotePatientUuid = req.params.silknotePatientUuid!;
+    const files          = req.files as Express.Multer.File[];
+    const rawClientIds   = req.body.clientFileId || [];
+
+    if (!files?.length) {
+      return res.status(400).json({ success: false, error: 'No files uploaded' });
     }
-    
-    // Verify we have clientFileIds for each file
-    if (Array.isArray(clientFileIds) && clientFileIds.length !== uploadedFiles.length) {
-      return res.status(400).json({
-        success: false,
-        error: `Mismatch between uploaded files (${uploadedFiles.length}) and clientFileIds (${clientFileIds.length})`
-      });
-    }
-    
-    // Ensure patient exists
+
     const patient = await patientService.getPatientById(silknotePatientUuid);
     if (!patient) {
-      return res.status(404).json({ 
-        success: false,
-        error: 'Patient not found' 
-      });
+      return res.status(404).json({ success: false, error: 'Patient not found' });
     }
-    
-    const medicalDocuments: MedicalDocument[] = [];
-    
-    // Process each file
-    for (let i = 0; i < uploadedFiles.length; i++) {
-      const file = uploadedFiles[i];
-      const clientFileId = Array.isArray(clientFileIds) 
-        ? clientFileIds[i] 
-        : (typeof clientFileIds === 'string' ? clientFileIds : null);
-      
+
+    /* ---------------- INITIAL FAST PASS ---------------- */
+    const docsForAsync: MedicalDocument[] = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file         = files[i];
+      const clientFileId = Array.isArray(rawClientIds) ? rawClientIds[i] : rawClientIds;
+
       if (!clientFileId) {
-        console.error(`Missing clientFileId for file at index ${i} (${file.originalname})`);
+        console.error('[PROCESS] missing clientFileId for', file.originalname);
+        emitToPatientRoom(silknotePatientUuid, 'fileStatus', {
+          clientFileId: null,
+          silknotePatientUuid,
+          status: 'error',
+          stage: 'client_id_missing',
+          error: 'clientFileId missing for file'
+        });
         continue;
       }
-      
+
       try {
-        // STEP 1: Store the file with the proper clientFileId
-        const storedPath = await storageService.finalizeUploadedFile(file.path, clientFileId);
-        console.log(`[PROCESS] File stored at: ${storedPath} with clientFileId: ${clientFileId}`);
-        
-        // STEP 2: Get page count
-        let pageCount = 0;
-        try {
-          pageCount = await storageService.getPdfPageCount(storedPath);
-        } catch (pdfError) {
-          console.error(`Error reading PDF: ${pdfError instanceof Error ? pdfError.message : 'Unknown error'}`);
-        }
-        
-        // STEP 3: Create MedicalDocument with storedPath included
-        const document: MedicalDocument = {
-          clientFileId,
-          silknotePatientUuid,
-          originalName: file.originalname,
-          storedPath,
-          status: 'unprocessed',
-          category: DocumentType.UNPROCESSED,
-          uploadDate: new Date().toISOString(),
-          type: 'application/pdf',
-          size: file.size,
-          title: file.originalname,
-          format: {
-            mimeType: 'application/pdf',
-            extension: 'pdf'
-          },
-          fileSize: file.size,
-          filename: path.basename(storedPath),
-          pageCount,
-          processedAt: new Date().toISOString(),
-          content: {
-            analysisResult: null,
-            extractedSchemas: [],
-            enrichedSchemas: [],
-            pageImages: []
-          },
-          confidence: 0
-        };
-        
-        // STEP 4: Add document to patient record
-        await patientService.addFileToPatient(silknotePatientUuid, document);
-        console.log(`[PROCESS] MedicalDocument added to patient record: ${silknotePatientUuid}, document: ${clientFileId}`);
-        
-        // STEP 5: NOW emit status update - ONLY after both file and document are stored
-        const statusEvent = {
-          clientFileId,
-          silknotePatientUuid,
-          status: 'stored',
-          stage: 'storage_complete'
-        };
-        console.log(`[PROCESS] Emitting status: ${JSON.stringify(statusEvent)}`);
-        emitToPatientRoom(silknotePatientUuid, 'fileStatus', statusEvent);
-        
-        // STEP 6: Queue document for processing
-        documentService.queueDocument({
-          filePath: storedPath,
-          patientContext: patient,
-          partialDoc: document
-        });
-        console.log(`[PROCESS] Document queued for processing: ${clientFileId}`);
-        
-        medicalDocuments.push(document);
-      } catch (fileError: any) {
-        // ---------------------------------------------------------
-        // Comprehensive error diagnostics
-        // ---------------------------------------------------------
-        const detailedError = {
-          file: file.originalname,
-          clientFileId,
-          type: fileError && fileError.constructor ? fileError.constructor.name : typeof fileError,
-          message: fileError instanceof Error ? fileError.message : String(fileError),
-          stack: fileError instanceof Error ? (fileError.stack || 'no-stack') : 'non-error',
-          raw: fileError
-        };
-
-        console.error('[PROCESS] 🛑 Failed processing file', JSON.stringify(detailedError, null, 2));
-
-        // Emit a socket event so the frontend knows it failed
+        const initialDoc = await quickStore(file, clientFileId, patient);
+        docsForAsync.push(initialDoc);
+      } catch (err: any) {
+        console.error('[PROCESS] 🛑 Sync failure for', file.originalname, err);
         emitToPatientRoom(silknotePatientUuid, 'fileStatus', {
           clientFileId,
           silknotePatientUuid,
           status: 'error',
-          stage: 'processing_failed',
-          error: detailedError.message
+          stage: 'initial_storage_failed',
+          error: err.message || 'unknown error'
         });
       }
     }
-    
-    return res.status(200).json({ 
-      success: true, 
-      documents: medicalDocuments
+
+    /* -------------- RESPOND WITHIN ~2-3 s -------------- */
+    res.status(202).json({
+      success  : true,
+      accepted : docsForAsync.length,
+      message  : 'Files stored; processing will continue in background'
     });
-  } catch (error) {
-    console.error('Error in file upload handler:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Error processing files',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    });
+
+    /* --------------- BACKGROUND HEAVY WORK -------------- */
+    for (const doc of docsForAsync) {
+      (async () => {
+        try {
+          // 1. page count
+          const pageCount = await storageService.getPdfPageCount(doc.storedPath);
+          if (pageCount) {
+            doc.pageCount = pageCount;
+            // Ensure patientService.updateFileForPatient exists and handles this update correctly
+            await patientService.updateFileForPatient(silknotePatientUuid, doc);
+          }
+
+          // 2. queue full processing (vector / OpenAI)
+          await documentService.queueDocument({
+            filePath       : doc.storedPath,
+            patientContext : patient,
+            partialDoc     : doc
+          });
+
+        } catch (err: any) {
+          console.error('[PROCESS-ASYNC] 🛑', doc.clientFileId, err);
+          emitToPatientRoom(silknotePatientUuid, 'fileStatus', {
+            clientFileId: doc.clientFileId,
+            silknotePatientUuid,
+            status: 'error',
+            stage : 'async_processing_failed',
+            error : err.message || 'unknown error'
+          });
+        }
+      })(); // fire-and-forget
+    }
   }
-});
+);
 
 // POST / - create a new patient
 router.post('/', async (req, res) => {
