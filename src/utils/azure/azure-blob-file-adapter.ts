@@ -33,7 +33,17 @@ const logger = createLogger('AZURE_BLOB_ADAPTER');
 export function createAzureBlobFileAdapter(): FileStorageAdapter {
     let containerClient: ContainerClient | null = null;
 
+    /* ------------------------------------------------------------------
+     * Helper: direct console logging wrapper
+     * ------------------------------------------------------------------ */
+    const clog = (...args: any[]) => {
+        // Always output to stdout so that Heroku log drains pick it up even if
+        // the Winston/derived logger is muted or configured differently.
+        console.log('[AZURE_BLOB_ADAPTER]', ...args);
+    };
+
     const initialize = async (): Promise<{ success: boolean; errors: StorageError[] }> => {
+        clog('Initializing Azure Blob adapter…');
         const errors: StorageError[] = [];
         // AZURE_STORAGE_CONNECTION_STRING will still be read from process.env for now as per current adapter structure
         // but AZURE_STORAGE_CONTAINER_NAME will come from config
@@ -43,6 +53,7 @@ export function createAzureBlobFileAdapter(): FileStorageAdapter {
         if (!connectionString) {
             errors.push({ code: 'AZURE_CONFIG_MISSING', message: 'Azure Storage connection string is not configured.' });
             logger.error('Azure Storage connection string is not configured.');
+            clog('❌ Azure Storage connection string missing – adapter NOT initialised');
             return { success: false, errors };
         }
         try {
@@ -52,14 +63,17 @@ export function createAzureBlobFileAdapter(): FileStorageAdapter {
             const createContainerResponse = await containerClient.createIfNotExists();
             if (createContainerResponse.succeeded || createContainerResponse._response.status === 409) { // 409 means it already exists
                 logger.info(`Azure Blob container "${containerName}" is ready.`);
+                clog(`✅ Azure Blob container "${containerName}" is ready (status ${createContainerResponse._response.status}).`);
                 return { success: true, errors: [] };
             } else {
                 errors.push({ code: 'AZURE_CONTAINER_ERROR', message: `Failed to create or access container ${containerName}. Status: ${createContainerResponse._response.status}` });
                 logger.error(`Failed to create or access container ${containerName}. Status: ${createContainerResponse._response.status}`, createContainerResponse);
+                clog(`❌ Failed to access container "${containerName}" – status ${createContainerResponse._response.status}`);
                 return { success: false, errors };
             }
         } catch (error: any) {
             logger.error('Failed to initialize Azure Blob Storage adapter:', error);
+            clog('❌ Azure Blob adapter initialisation error:', error?.message || error);
             errors.push({ code: 'AZURE_INIT_FAILED', message: error.message || 'Unknown error during Azure Blob initialization' });
             return { success: false, errors };
         }
@@ -69,13 +83,16 @@ export function createAzureBlobFileAdapter(): FileStorageAdapter {
         if (!containerClient) throw new Error('Azure Blob adapter not initialized.');
         const containerName = config.storage.azureContainerName; // Use from config
         logger.info(`Storing file "${filename}" in Azure Blob container "${containerName}".`);
+        clog(`⬆️  Uploading "${filename}" to container "${containerName}"…`);
         const blockBlobClient: BlockBlobClient = containerClient.getBlockBlobClient(filename);
         try {
             await blockBlobClient.uploadData(fileBuffer);
             logger.info(`File "${filename}" uploaded successfully to Azure Blob.`);
+            clog(`✅ Upload of "${filename}" complete.`);
             return filename; // Return the blob name (which is the filename here)
         } catch (error: any) {
             logger.error(`Failed to store file "${filename}" in Azure Blob:`, error);
+            clog(`❌ Upload failed for "${filename}":`, error?.message || error);
             throw new Error(`Azure Blob storeFile failed: ${error.message}`);
         }
     };
@@ -84,13 +101,16 @@ export function createAzureBlobFileAdapter(): FileStorageAdapter {
         if (!containerClient) throw new Error('Azure Blob adapter not initialized.');
         const containerName = config.storage.azureContainerName; // Use from config
         logger.info(`Getting file content for "${fileRef}" from Azure Blob container "${containerName}".`);
+        clog(`⬇️  Downloading "${fileRef}" from container "${containerName}"…`);
         const blockBlobClient: BlockBlobClient = containerClient.getBlockBlobClient(fileRef);
         try {
             const downloadBlockBlobResponse = await blockBlobClient.downloadToBuffer();
             logger.info(`File "${fileRef}" content retrieved successfully from Azure Blob.`);
+            clog(`✅ Download of "${fileRef}" complete.`);
             return downloadBlockBlobResponse;
         } catch (error: any) {
             logger.error(`Failed to get file content for "${fileRef}" from Azure Blob:`, error);
+            clog(`❌ Download failed for "${fileRef}":`, error?.message || error);
             if (error.statusCode === 404) {
                 throw new Error(`File not found in Azure Blob: ${fileRef}`);
             }
@@ -102,13 +122,16 @@ export function createAzureBlobFileAdapter(): FileStorageAdapter {
         if (!containerClient) throw new Error('Azure Blob adapter not initialized.');
         const containerName = config.storage.azureContainerName; // Use from config
         logger.info(`Deleting file "${fileRef}" from Azure Blob container "${containerName}".`);
+        clog(`🗑️  Deleting "${fileRef}" from container "${containerName}"…`);
         const blockBlobClient: BlockBlobClient = containerClient.getBlockBlobClient(fileRef);
         try {
             await blockBlobClient.delete();
             logger.info(`File "${fileRef}" deleted successfully from Azure Blob.`);
+            clog(`✅ Deletion of "${fileRef}" complete.`);
             return true;
         } catch (error: any) {
             logger.error(`Failed to delete file "${fileRef}" from Azure Blob:`, error);
+            clog(`❌ Deletion failed for "${fileRef}":`, error?.message || error);
             // Depending on desired behavior, you might return false or throw
             // For now, let's rethrow to indicate failure clearly
             throw new Error(`Azure Blob deleteFile failed: ${error.message}`);
