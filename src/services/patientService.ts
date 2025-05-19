@@ -204,61 +204,49 @@ export async function addFileToPatient(silknotePatientUuid: string, medicalDocum
   const timestamp = new Date().toISOString();
   console.log(`[${timestamp}] [PATIENT SERVICE DB] Adding file reference to patient:`, {
     silknotePatientUuid,
-    fileId: medicalDocument.clientFileId,
+    clientFileId: medicalDocument.clientFileId,
+    silknoteDocumentUuid: medicalDocument.silknoteDocumentUuid,
     fileName: medicalDocument.originalName,
-    storedPath: medicalDocument.storedPath // VSRX path
+    storedPath: medicalDocument.storedPath
   });
 
-  if (!silknotePatientUuid || !medicalDocument || !medicalDocument.clientFileId || !medicalDocument.storedPath) {
-    throw new Error('Missing required parameters: silknotePatientUuid, clientFileId, and storedPath are required.');
+  if (!silknotePatientUuid || !medicalDocument || !medicalDocument.clientFileId || !medicalDocument.storedPath || !medicalDocument.silknoteDocumentUuid) {
+    throw new Error('Missing required parameters: silknotePatientUuid, silknoteDocumentUuid, clientFileId, and storedPath are required.');
   }
 
-  // The dbAdapter's addDocumentToPatient should handle associating the doc with the patient
   try {
     if (!storageService.isInitialized()) throw new Error('Storage service not initialized');
 
-    // Ensure patient exists before adding doc (dbAdapter might handle this via FK constraints)
     const patientExists = await storageService.dbAdapter.getPatient(silknotePatientUuid);
     if (!patientExists) {
-        console.warn(`[PATIENT SERVICE DB] Patient ${silknotePatientUuid} not found. Attempting to create minimal patient record.`);
-        // Depending on adapter implementation, addDocumentToPatient might create the patient
-        // or we might need to call createPatient first. Let's assume addDocumentToPatient handles it for now.
+        console.warn(`[PATIENT SERVICE DB] Patient ${silknotePatientUuid} not found. Document will not be added without a valid patient.`);
+        throw new Error(`Patient ${silknotePatientUuid} not found.`);
     }
 
-    // Assign silknotePatientUuid just in case it wasn't set
-    medicalDocument.silknotePatientUuid = silknotePatientUuid;
-    
-    // Set status if not already set
-    medicalDocument.status = medicalDocument.status || 'received'; // Or 'queued' depending on flow
+    medicalDocument.status = medicalDocument.status || 'stored';
 
     const success = await storageService.dbAdapter.addDocumentToPatient(silknotePatientUuid, medicalDocument);
     if (!success) {
-      throw new Error(`Failed to add document ${medicalDocument.clientFileId} reference to patient ${silknotePatientUuid}`);
+      throw new Error(`Failed to add document ${medicalDocument.clientFileId} (UUID: ${medicalDocument.silknoteDocumentUuid}) reference to patient ${silknotePatientUuid}`);
     }
 
-    console.log(`[${timestamp}] [PATIENT SERVICE DB] Successfully added file reference:`, {
+    console.log(`[${timestamp}] [PATIENT SERVICE DB] Successfully initiated save for file reference:`, {
       silknotePatientUuid,
-      fileId: medicalDocument.clientFileId,
+      clientFileId: medicalDocument.clientFileId,
+      silknoteDocumentUuid: medicalDocument.silknoteDocumentUuid
     });
 
-    // Refetch the document to ensure we have the DB version (optional, but good practice)
-    const addedDoc = await storageService.dbAdapter.getDocument(medicalDocument.clientFileId);
+    const addedDoc = await storageService.dbAdapter.getDocument(medicalDocument.silknoteDocumentUuid!);
     if (!addedDoc) {
-       console.warn(`[PATIENT SERVICE DB] Could not refetch added document ${medicalDocument.clientFileId}`);
-       // Return the input doc as fallback, but log a warning
+       console.warn(`[PATIENT SERVICE DB] Could not refetch added document using silknoteDocumentUuid: ${medicalDocument.silknoteDocumentUuid} (clientFileId: ${medicalDocument.clientFileId})`);
        return medicalDocument;
     }
 
-
-    // Emit websocket events (keep this logic)
     if (io) {
       const roomName = `patient-${silknotePatientUuid}`;
       const msgId = `fa-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
       console.log(`[PATIENT SERVICE] === WEBSOCKET EVENT === About to emit fileAdded event [${msgId}] to room ${roomName}`);
-      const fileAddedEvent = {
-        ...addedDoc, // Emit the document retrieved from DB
-        clientFileId: addedDoc.clientFileId
-      };
+      const fileAddedEvent = { ...addedDoc };
       io.to(roomName).emit('fileAdded', fileAddedEvent);
       console.log(`[PATIENT SERVICE] === WEBSOCKET EVENT === fileAdded event [${msgId}] emitted successfully for ${addedDoc.clientFileId} (${addedDoc.originalName})`);
     }
@@ -266,7 +254,7 @@ export async function addFileToPatient(silknotePatientUuid: string, medicalDocum
     return addedDoc;
   } catch (error) {
     console.error(`[${timestamp}] [PATIENT SERVICE DB] Error adding file reference for patient ${silknotePatientUuid}:`, error);
-    throw error; // Re-throw error
+    throw error;
   }
 }
 

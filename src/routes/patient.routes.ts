@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express'
 import fs from 'fs'
 import path from 'path'
+import { v4 as uuidv4 } from 'uuid'
 
 import config from '../config'
 import { MedicalDocument, DocumentType, PatientDetails, DocumentAlertType } from '../shared/types'
@@ -24,12 +25,15 @@ async function quickStore(
   // 1. move blob to its final name
   const storedPath = await storageService.finalizeUploadedFile(file.path, clientFileId);
 
+  const silknoteDocumentUuid = uuidv4(); // Generate a new UUID for the DB record
+
   // 2. stub MedicalDocument – omit pageCount for now
   const doc: MedicalDocument = {
-    clientFileId,
+    silknoteDocumentUuid, // Assign the generated UUID as the primary DB identifier
+    clientFileId,         // Keep clientFileId as a separate field (e.g., for blob name reference)
     silknotePatientUuid: patient.silknotePatientUuid,
     originalName: file.originalname,
-    storedPath,
+    storedPath,           // This IS the clientFileId, which is the blob name
     status: 'stored',
     category: DocumentType.UNPROCESSED,
     uploadDate: new Date().toISOString(),
@@ -38,7 +42,7 @@ async function quickStore(
     title: file.originalname,
     format: { mimeType: 'application/pdf', extension: 'pdf' },
     fileSize: file.size,
-    filename: path.basename(storedPath),
+    filename: path.basename(storedPath), // this will also be clientFileId
     pageCount: 0, // Placeholder
     content: { analysisResult: null, extractedSchemas: [], enrichedSchemas: [], pageImages: [] },
     confidence: 0
@@ -49,7 +53,8 @@ async function quickStore(
 
   // 4. socket "stored"
   emitToPatientRoom(patient.silknotePatientUuid, 'fileStatus', {
-    clientFileId,
+    clientFileId, // The ID client initially knew
+    silknoteDocumentUuid, // The actual DB primary key
     silknotePatientUuid: patient.silknotePatientUuid,
     status: 'stored',
     stage: 'storage_complete'
