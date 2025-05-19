@@ -150,21 +150,31 @@ export function createAzureBlobFileAdapter(): FileStorageAdapter {
         // For now, let's assume it's a rename/copy within the container if needed.
         // A common pattern is to upload directly to the finalName.
         // If it's a copy and delete:
-        const sourceBlobClient: BlockBlobClient = containerClient.getBlockBlobClient(tempPath);
+        clog(`🔄 finalizeUploadedFile tempPath="${tempPath}" → finalName="${finalName}"`);
+
+        // Multer Azure storage sets file.path to `${containerName}/${blobName}`. Strip container prefix if present.
+        const normalisedTempBlobName = tempPath.startsWith(`${containerClient.containerName}/`)
+            ? tempPath.substring(containerClient.containerName.length + 1)
+            : tempPath;
+
+        const sourceBlobClient: BlockBlobClient = containerClient.getBlockBlobClient(normalisedTempBlobName);
         const destBlobClient: BlockBlobClient = containerClient.getBlockBlobClient(finalName);
+        clog(`Source blob resolved as "${normalisedTempBlobName}"`);
         try {
             const properties = await sourceBlobClient.getProperties();
             if (!properties.contentLength) {
-                throw new Error(`Source blob ${tempPath} not found or is empty.`);
+                throw new Error(`Source blob ${normalisedTempBlobName} not found or is empty.`);
             }
             const copyPoller = await destBlobClient.beginCopyFromURL(sourceBlobClient.url);
             await copyPoller.pollUntilDone();
             await sourceBlobClient.delete(); // Delete the temporary blob
             logger.info(`File finalized from "${tempPath}" to "${finalName}" in Azure Blob.`);
+            clog(`✅ Finalised blob. New name="${finalName}" (old was "${normalisedTempBlobName}")`);
             return finalName;
         } catch (error: any) {
             logger.error(`Failed to finalize file from "${tempPath}" to "${finalName}" in Azure Blob:`, error);
-            throw new Error(`Azure Blob finalizeUploadedFile failed: ${error.message}`);
+            clog(`❌ finalizeUploadedFile error:`, error?.message || error);
+            throw new Error(`Azure Blob finalizeUploadedFile failed: ${error && error.message ? error.message : 'unknown'}`);
         }
     };
 
