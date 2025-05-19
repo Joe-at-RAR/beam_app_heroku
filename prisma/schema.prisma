@@ -98,7 +98,7 @@ languageAudioAzure         String   @default("[\\\"en-AU\\\"]") // Default to st
   // Direct link from User to the Patient Filesets they own
   patientFilesets     SilknotePatientFileset[]
   
-  silknoteUserUuid String?      
+  silknoteUserUuid String @unique @default(uuid())
   
   @@map("auth_user")
   @@index([silknoteUserUuid])
@@ -952,7 +952,7 @@ model SilknotePatientFileset {
 
   // Link back to the owning User
   silknoteUserUuid              String 
-  user                User      @relation(fields: [silknoteUserUuid], references: [id])
+ user                User      @relation(fields: [silknoteUserUuid], references: [silknoteUserUuid])
 
   // Store patient context directly here, mirroring PatientDetails
   patientName         String? 
@@ -974,6 +974,7 @@ model SilknotePatientFileset {
 
   @@map("silknote_patient_filesets")
   @@index([silknotePatientUuid])
+  @@index([silknoteUserUuid])
 }
 
 model SilknoteDocument {
@@ -991,7 +992,7 @@ model SilknoteDocument {
   category             String    /// @encrypted // Example encryption
   mimeType             String
   sizeBytes            Int?
-  pageCount            Int?      /// @encrypted // Changed from String?
+  pageCount            Int?    
   documentDate         String?                  // Removed encryption comment
   uploadDate           DateTime  @default(now())
   processedAt          DateTime?

@@ -21,6 +21,7 @@ const logger = createLogger('SOCKETS')
 export { io };
 
 export function initSocket(server: http.Server) {
+  logger.info('Attempting to initialize Socket.IO server...');
   logger.info('Initializing Socket.IO server:', {
     environment: config.server.nodeEnv,
     corsOrigin: Array.isArray(config.server.corsOrigin) 

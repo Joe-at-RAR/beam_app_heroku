@@ -162,7 +162,7 @@ function emitToPatientRoom(silknotePatientUuid: string, event: string, data: any
 }
 
 // POST /:silknotePatientUuid/process - handle file upload with multer
-router.post('/:silknotePatientUuid/process', storageService.createPdfUploadMiddleware(), async (req, res) => {
+router.post('/:silknotePatientUuid/process', (req, res, next) => storageService.createPdfUploadMiddleware()(req, res, next), async (req, res) => {
   try {
     // Log basic information about the request
     console.log('Document upload request received');
