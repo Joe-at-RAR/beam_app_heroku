@@ -789,12 +789,12 @@ export async function generateComprehensiveCaseSummary(
 
       // 4. Generate the final summary object
       logger.info(`[VECTOR STORE - GEN_COMP_SUMMARY] Validating final summary format...`);
-     // const processedSummary = ensureValidCaseSummaryFormat(combinedSummary);
+      const processedSummary = ensureValidCaseSummaryFormat(combinedSummary);
       logger.info(`[VECTOR STORE - GEN_COMP_SUMMARY] Validation complete. Final summary ready.`);
 
       // Return the summary and the combined, unique citations
       // --- RETURN ALL CITATIONS --- 
-      return { summary: combinedSummary, citations: allCitations }; // Return all citations, not unique ones
+      return { summary: processedSummary, citations: allCitations }; // Return all citations, not unique ones
     } catch (error) {
       logger.error(`[VECTOR STORE - GEN_COMP_SUMMARY] Error generating comprehensive case summary: ${error instanceof Error ? error.message : String(error)}`);
       // Ensure we return the expected structure even on error
@@ -812,32 +812,86 @@ export async function generateComprehensiveCaseSummary(
  * and convert any enum values to strings
  */
 function ensureValidCaseSummaryFormat(summary: any): CaseSummaryType {
-  // Ensure all basic fields exist
-  const validatedSummary = {
-    ...summary,
-    
-    // Ensure required string fields have values
-    patientName: summary.patientName || "",
-    patientDateOfBirth: summary.patientDateOfBirth || "",
-    patientGender: summary.patientGender || "",
-    patientOccupation: summary.patientOccupation || "",
-    
-    // Ensure array fields exist
-    diagnoses: Array.isArray(summary.diagnoses) ? summary.diagnoses : [],
-    treatments: Array.isArray(summary.treatments) ? summary.treatments : [],
-    testResults: Array.isArray(summary.testResults) ? summary.testResults : [],
-    keyEvents: Array.isArray(summary.keyEvents) ? summary.keyEvents : [],
-    medicalHistory: Array.isArray(summary.medicalHistory) ? summary.medicalHistory : [],
-    medicalTimeline: Array.isArray(summary.medicalTimeline) ? summary.medicalTimeline : [],
-    
-    // Ensure medicalInconsistencies exists
-    medicalInconsistencies: summary.medicalInconsistencies || { 
-      hasInconsistencies: false, 
-      inconsistencies: [] 
+  // Define a fully populated blank summary that conforms to CaseSummaryZodSchema.
+  const blankSummary: CaseSummaryType = {
+    narrativeOverview: "",
+    reportTitle: "",
+    patientName: "",
+    reportDate: "",
+    patientDateOfBirth: "",
+    patientGender: "",
+    patientOccupation: "",
+    insurerName: "",
+    insuranceScheme: "",
+    claimNumber: "",
+    policyType: "",
+    socialHistory: "",
+    diagnoses: [],
+    keyEvents: [],
+    treatments: [],
+    testResults: [],
+    medicalHistory: [],
+    medicalTimeline: [],
+    employerName: "",
+    employmentStatus: "",
+    workRelatedInjury: false,
+    employmentNotes: "",
+    legalNotes: "",
+    medicalInconsistencies: {
+      hasInconsistencies: false,
+      inconsistencies: []
     }
+  } as unknown as CaseSummaryType;
+
+  // Helper to validate an array – returns [] if not a valid array
+  const safeArray = (value: any) => (Array.isArray(value) ? value : []);
+
+  // Merge the provided summary with the blank defaults, then re-validate array fields
+  const merged = {
+    ...blankSummary,
+    ...(summary || {})
   };
-  
-  return validatedSummary as CaseSummaryType;
+
+  return {
+    ...merged,
+
+    // Ensure primitive string fields are at least an empty string when falsy
+    narrativeOverview: merged.narrativeOverview || "",
+    reportTitle: merged.reportTitle || "",
+    patientName: merged.patientName || "",
+    reportDate: merged.reportDate || "",
+    patientDateOfBirth: merged.patientDateOfBirth || "",
+    patientGender: merged.patientGender || "",
+    patientOccupation: merged.patientOccupation || "",
+    insurerName: merged.insurerName || "",
+    insuranceScheme: merged.insuranceScheme || "",
+    claimNumber: merged.claimNumber || "",
+    policyType: merged.policyType || "",
+    socialHistory: merged.socialHistory || "",
+    employerName: merged.employerName || "",
+    employmentStatus: merged.employmentStatus || "",
+    employmentNotes: merged.employmentNotes || "",
+    legalNotes: merged.legalNotes || "",
+
+    // Boolean with sane default
+    workRelatedInjury: typeof merged.workRelatedInjury === "boolean" ? merged.workRelatedInjury : false,
+
+    // Arrays – guaranteed to be arrays
+    diagnoses: safeArray(merged.diagnoses),
+    keyEvents: safeArray(merged.keyEvents),
+    treatments: safeArray(merged.treatments),
+    testResults: safeArray(merged.testResults),
+    medicalHistory: safeArray(merged.medicalHistory),
+    medicalTimeline: safeArray(merged.medicalTimeline),
+
+    // medicalInconsistencies – ensure object and inner array
+    medicalInconsistencies: {
+      hasInconsistencies: !!(merged.medicalInconsistencies && typeof merged.medicalInconsistencies.hasInconsistencies === "boolean")
+        ? merged.medicalInconsistencies.hasInconsistencies
+        : false,
+      inconsistencies: safeArray(merged.medicalInconsistencies?.inconsistencies)
+    }
+  } as CaseSummaryType;
 }
 
 
