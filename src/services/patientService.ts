@@ -7,6 +7,7 @@ import config from '../config';
 import { Response } from 'express';
 import { v4 as uuidv4 } from 'uuid'; // Ensure UUID is imported
 import * as vectorStore from './vectorStore'  // Add the vectorStore import here
+import { removeFileFromVectorStore } from './vectorStore'; // Specific import
 import { createLogger } from '../utils/logger'; // Import logger
 
 const logger = createLogger('PATIENT_SERVICE'); // Create logger instance
@@ -259,28 +260,51 @@ export async function addFileToPatient(silknotePatientUuid: string, medicalDocum
 }
 
 export async function deleteFileFromPatient(silknotePatientUuid: string, clientFileId: string): Promise<void> {
-   console.log(`[PATIENT SERVICE DB] Deleting file reference ${clientFileId} for patient ${silknotePatientUuid}`);
+  console.log(`[PATIENT SERVICE DB] Deleting file reference ${clientFileId} for patient ${silknotePatientUuid}`);
   if (!silknotePatientUuid || !clientFileId) {
     throw new Error('Missing required parameters: silknotePatientUuid and clientFileId are required.');
   }
   try {
     if (!storageService.isInitialized()) throw new Error('Storage service not initialized');
-    const success = await storageService.dbAdapter.deleteDocument(clientFileId); // Assumes document ID is unique across patients
-    if (!success) {
-      // Log warning, but don't throw? Or throw if deletion is critical?
-      console.warn(`[PATIENT SERVICE DB] Failed to delete document ${clientFileId} from database or it didn't exist.`);
-    } else {
-        console.log(`[PATIENT SERVICE DB] Successfully deleted document reference ${clientFileId}`);
+
+    // Attempt to remove from vector store first
+    try {
+      const vsDeletionSuccess = await removeFileFromVectorStore(silknotePatientUuid, clientFileId);
+      if (vsDeletionSuccess) {
+        console.log(`[PATIENT SERVICE] Successfully removed ${clientFileId} from vector store for patient ${silknotePatientUuid}.`);
+      } else {
+        // Log a warning but proceed with DB deletion, as the file might not have been in VS or an error occurred
+        console.warn(`[PATIENT SERVICE] Could not remove ${clientFileId} from vector store for patient ${silknotePatientUuid}, or it was not present. Proceeding with DB deletion.`);
+      }
+    } catch (vsError) {
+      console.error(`[PATIENT SERVICE] Error during vector store deletion for ${clientFileId}, patient ${silknotePatientUuid}. Proceeding with DB deletion. Error:`, vsError);
+      // Log and continue with DB deletion
     }
 
-    // Emit websocket event (keep this)
+    // Then delete from the main database (removes fileSet entry)
+    const dbDeletionSuccess = await storageService.dbAdapter.deleteDocument(clientFileId); 
+    if (!dbDeletionSuccess) {
+      console.warn(`[PATIENT SERVICE DB] Failed to delete document ${clientFileId} from database or it didn't exist.`);
+    } else {
+      console.log(`[PATIENT SERVICE DB] Successfully deleted document reference ${clientFileId} from database.`);
+    }
+
+    // The physical file deletion is handled by fileService.deleteFile, called from the route handler.
+    // This service only manages the patient's record and vector store linkage.
+
+    // Emit websocket event
     const roomName = `patient-${silknotePatientUuid}`;
     console.log(`[PATIENT SERVICE] Emitting fileDeleted event for file: ${clientFileId} to room ${roomName}`);
-    io.to(roomName).emit('fileDeleted', { clientFileId, silknotePatientUuid });
+    if (io) {
+        io.to(roomName).emit('fileDeleted', { clientFileId, silknotePatientUuid, message: 'File processing complete, removed from records.' });
+    } else {
+        console.warn("[PATIENT SERVICE] Socket.io instance (io) is not available. Cannot emit 'fileDeleted' event.");
+    }
 
   } catch (error) {
     console.error(`[PATIENT SERVICE DB] Error deleting file ${clientFileId} for patient ${silknotePatientUuid}:`, error);
-    throw error; // Re-throw
+    // It's important to re-throw so the route handler can catch it and send a 500 status
+    throw error; 
   }
 }
 

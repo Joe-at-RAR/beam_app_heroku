@@ -942,4 +942,87 @@ export async function queryAssistantWithCitations(
 //   }
 // }
 
+export async function removeFileFromVectorStore(
+  silknotePatientUuid: string,
+  clientFileId: string
+): Promise<boolean> {
+  console.log(`[VECTOR STORE] Attempting to remove file ${clientFileId} from vector store for patient ${silknotePatientUuid}`);
+  try {
+    const patient = await patientService.getPatientById(silknotePatientUuid);
+    if (!patient) {
+      console.error(`[VECTOR STORE] Patient ${silknotePatientUuid} not found.`);
+      return false;
+    }
+    if (!patient.vectorStore || !patient.vectorStore.vectorStoreIndex || !patient.vectorStore.fileIdMappings) {
+      console.warn(`[VECTOR STORE] Patient ${silknotePatientUuid} does not have a fully configured vector store or file mappings. Skipping deletion from vector store.`);
+      return true; // Return true as there's nothing to delete from vector store perspective
+    }
+
+    const vectorStoreId = patient.vectorStore.vectorStoreIndex;
+    const mappingIndex = patient.vectorStore.fileIdMappings.findIndex(m => m.clientFileId === clientFileId);
+
+    if (mappingIndex === -1) {
+      console.warn(`[VECTOR STORE] No OpenAI file mapping found for clientFileId ${clientFileId} in patient ${silknotePatientUuid}. File might have been already removed or not added.`);
+      // Also check processedFiles for consistency, though mapping is key
+      if (patient.vectorStore.processedFiles) {
+        patient.vectorStore.processedFiles = patient.vectorStore.processedFiles.filter(pf => pf.fileName !== clientFileId && (!pf.fileName.startsWith(clientFileId + '.')));
+        // Persist this change even if no OpenAI mapping was found
+        await patientService.updatePatient(patient);
+      }
+      return true; // Indicate success as the file isn't mapped in the vector store
+    }
+
+    const mapping = patient.vectorStore.fileIdMappings[mappingIndex];
+    const openaiFileId = mapping.openaiFileId;
+
+    console.log(`[VECTOR STORE] Found OpenAI fileId ${openaiFileId} for clientFileId ${clientFileId}. Proceeding with deletion from vector store ${vectorStoreId}.`);
+
+    // 1. Delete file association from vector store
+    try {
+      await openai.beta.vectorStores.files.del(vectorStoreId, openaiFileId);
+      console.log(`[VECTOR STORE] Successfully disassociated OpenAI file ${openaiFileId} from vector store ${vectorStoreId}.`);
+    } catch (error: any) {
+      // If the file is already disassociated or not found, it might throw an error. Log and continue.
+      // OpenAI API might return 404 if file not found in VS, which is acceptable if we intend to delete.
+      if (error.status === 404) {
+        console.warn(`[VECTOR STORE] OpenAI file ${openaiFileId} not found in vector store ${vectorStoreId} (already disassociated or never added).`);
+      } else {
+        console.error(`[VECTOR STORE] Error disassociating OpenAI file ${openaiFileId} from vector store ${vectorStoreId}:`, error);
+        // Depending on policy, you might want to re-throw or return false
+        // For now, we'll log and attempt to delete the OpenAI file object itself if it exists.
+      }
+    }
+
+    // 2. Delete the file object from OpenAI (if no longer needed by any other VS or assistant)
+    try {
+      await openai.files.del(openaiFileId);
+      console.log(`[VECTOR STORE] Successfully deleted OpenAI file object ${openaiFileId}.`);
+    } catch (error: any) {
+      // If the file is already deleted, it might throw an error. Log and continue.
+      if (error.status === 404) {
+        console.warn(`[VECTOR STORE] OpenAI file object ${openaiFileId} not found (already deleted).`);
+      } else {
+        console.error(`[VECTOR STORE] Error deleting OpenAI file object ${openaiFileId}:`, error);
+        // Log error but continue to update patient record
+      }
+    }
+
+    // 3. Update patient's vectorStore metadata
+    patient.vectorStore.fileIdMappings.splice(mappingIndex, 1);
+    if (patient.vectorStore.processedFiles) {
+      // Filter by openaiFileId from processedFiles as well if it exists there, or by fileName if that's what's stored
+      patient.vectorStore.processedFiles = patient.vectorStore.processedFiles.filter(pf => pf.fileId !== openaiFileId && pf.fileName !== mapping.fileName);
+    }
+    patient.vectorStore.lastUpdated = new Date().toISOString();
+
+    await patientService.updatePatient(patient);
+    console.log(`[VECTOR STORE] Successfully updated patient ${silknotePatientUuid} record after removing file ${clientFileId}.`);
+
+    return true;
+  } catch (error) {
+    console.error(`[VECTOR STORE] Failed to remove file ${clientFileId} for patient ${silknotePatientUuid}:`, error);
+    return false;
+  }
+}
+
 

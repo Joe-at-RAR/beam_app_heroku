@@ -5,12 +5,16 @@ import * as patientService from '../services/patientService';
 import {  CaseSummaryType, parseCaseSummary } from "../shared/case-summary-types";
 import { asyncHandler } from "../utils/errorHandlers";
 import { Request, Response } from "express";
-// import { errorDiagnostics } from "../utils/debug";
-import { CaseSummaryApiResponse as SharedCaseSummaryApiResponse, SummaryCitation } from '../shared/types';
+import { CaseSummaryApiResponse, SummaryCitation } from '../shared/types'; // Corrected: Was SharedCaseSummaryApiResponse, now CaseSummaryApiResponse
 import { createLogger } from '../utils/logger'
 import config from '../config';
 import { randomUUID } from "crypto";
 import { storageService } from "../utils/storage";
+import { io } from '../utils/io'; // Import the global io instance
+// Ensure ServerToClientEvents and SharedCaseSummaryApiResponse are correctly typed/imported
+// For instance, if SharedCaseSummaryApiResponse is in ../shared/types:
+// import { SharedCaseSummaryApiResponse } from '../shared/types';
+
 const logger = createLogger('CASE_SUMMARY')
 const router: Router = Router();
 
@@ -42,7 +46,7 @@ router.get('/retrieve/:silknotePatientUuid', asyncHandler(async (req: Request, r
     console.log(`[CASE SUMMARY] Successfully retrieved existing case summary for patient: ${silknotePatientUuid}`);
     
     // Type safety: Ensure patient.caseSummary matches expected structure (though DB/fetch should handle this)
-    const fullCaseSummary = patient.caseSummary as SharedCaseSummaryApiResponse | null;
+    const fullCaseSummary = patient.caseSummary as CaseSummaryApiResponse | null;
     if (!fullCaseSummary || !fullCaseSummary.summary) {
       // This case should ideally be caught by the check above, but added for robustness
       console.error(`[CASE SUMMARY] Retrieved patient.caseSummary is missing the 'summary' field for ${silknotePatientUuid}`);
@@ -57,7 +61,7 @@ router.get('/retrieve/:silknotePatientUuid', asyncHandler(async (req: Request, r
     }
 
     // Construct the final response using the full structure
-    const response: SharedCaseSummaryApiResponse = {
+    const response: CaseSummaryApiResponse = {
       summary: parsedSummary, // Use the potentially parsed summary object
       citations: fullCaseSummary.citations || [], // Use stored citations, default to empty array
       summaryGenerationCount: patient.summaryGenerationCount || 0,
@@ -509,53 +513,103 @@ export async function queryAssistantWithCitationsObject(
 
 router.get('/generate/:silknotePatientUuid', asyncHandler(async (req: Request, res: Response) => {
   const { silknotePatientUuid } = req.params;
-  
-  console.log(`[CASE SUMMARY] Generating new summary (Vector Store Method) for patient: ${silknotePatientUuid}`);
-  
+  // Assuming socketAuth middleware or similar authentication mechanism adds user to req.
+  // For robust user identification, ensure req.user.id or a similar property is available.
+  // If not, you might need to adjust how requesterId is obtained or handle anonymous requests if applicable.
+  const requesterId = (req as any).user?.id || 'unknown_requester'; 
+
+  logger.info(`[CASE SUMMARY] Received request to generate summary for patient: ${silknotePatientUuid} by ${requesterId}`);
+
   try {
     const patient = await getPatientById(silknotePatientUuid);
-    if (!patient) return res.status(404).json({ error: 'Patient not found' });
-
-    
-    const patientDocuments = patient.fileSet || [];
-    if (patientDocuments.length === 0) {
-      return res.status(404).json({ error: 'No documents found for patient' });
+    if (!patient) {
+      logger.warn(`[CASE SUMMARY] Patient not found for generation: ${silknotePatientUuid}`);
+      return res.status(404).json({ error: 'Patient not found' });
     }
 
-    // Use new vector-based generation
-    const { summary, citations } = await generateComprehensiveCaseSummary(
-      silknotePatientUuid
-    );
-    
+    const patientDocuments = patient.fileSet || [];
+    if (patientDocuments.length === 0) {
+      logger.warn(`[CASE SUMMARY] No documents found for patient: ${silknotePatientUuid}`);
+      return res.status(400).json({ error: 'No documents found for patient, cannot generate summary.' });
+    }
 
-
-    // Increment counter and update patient record (AFTER successful generation)
-    const newCount = (patient.summaryGenerationCount || 0) + 1;
-    patient.summaryGenerationCount = newCount;
-    
-    // IMPORTANT: Store the *full* result (summary + citations) in patient.caseSummary
-    // We need to construct the object to store first, including the *new* counts
-    const summaryToStore: SharedCaseSummaryApiResponse = {
-      summary: summary, // The potentially parsed summary
-      citations: citations || [], // The citations returned from generation
-      summaryGenerationCount: newCount, // The *new* count
-      maxCount: 5 // The hardcoded max count
+    // 1. Respond to HTTP request immediately
+    const jobTicket = {
+      patientId: silknotePatientUuid,
+      status: 'pending',
+      message: 'Case summary generation has started.',
+      timestamp: new Date().toISOString(),
+      jobId: randomUUID() // Add a unique job ID
     };
-    patient.caseSummary = summaryToStore;
-    await updatePatient(patient);
-    
-    console.log(`[CASE SUMMARY] Generated vector-based summary successfully. Count: ${newCount}`);
-    
-    // Return the exact structure that was stored
-    return res.status(200).json(summaryToStore);
+    res.status(202).json(jobTicket);
+
+    // 2. Perform the long-running task asynchronously (DO NOT await here)
+    generateAndNotify(silknotePatientUuid, requesterId, jobTicket.jobId);
 
   } catch (error) {
-    console.log(`[CASE SUMMARY] Error generating vector-based summary: ${error}`);
-    return res.status(500).json({ error: 'Failed to generate case summary' }); 
+    logger.error(`[CASE SUMMARY] Error initiating summary generation for patient ${silknotePatientUuid}:`, error);
+    if (!res.headersSent) {
+        return res.status(500).json({ error: 'Failed to initiate case summary generation' });
+    }
   }
 }));
 
+async function generateAndNotify(silknotePatientUuid: string, requesterId: string, jobId: string) {
+  const patientRoom = `patient-${silknotePatientUuid}`;
+  try {
+    logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] Starting generation for patient: ${silknotePatientUuid}, room: ${patientRoom}, requester: ${requesterId}`);
 
+    io.to(patientRoom).emit('caseSummaryStatus', {
+      patientId: silknotePatientUuid,
+      jobId,
+      status: 'processing',
+      message: 'Processing documents and generating summary...'
+    });
+
+    const patient = await getPatientById(silknotePatientUuid);
+    if (!patient) {
+        logger.error(`[CASE SUMMARY ASYNC JOB: ${jobId}] Patient ${silknotePatientUuid} not found during async processing.`);
+        io.to(patientRoom).emit('caseSummaryError', {
+            patientId: silknotePatientUuid,
+            jobId,
+            error: 'Patient not found during processing.'
+        });
+        return;
+    }
+    
+    const { summary, citations } = await generateComprehensiveCaseSummary(silknotePatientUuid);
+    
+    const newCount = (patient.summaryGenerationCount || 0) + 1;
+    // Corrected type to CaseSummaryApiResponse
+    const summaryToStore: CaseSummaryApiResponse = {
+      summary,
+      citations: citations || [],
+      summaryGenerationCount: newCount,
+      maxCount: 5 // Use hardcoded 5 for now
+    };
+    
+    const patientToUpdate = { ...patient, caseSummary: summaryToStore, summaryGenerationCount: newCount };
+    await updatePatient(patientToUpdate);
+
+    logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] Generation complete for patient: ${silknotePatientUuid}. Notifying room: ${patientRoom}`);
+
+    io.to(patientRoom).emit('caseSummaryComplete', {
+      patientId: silknotePatientUuid,
+      jobId,
+      status: 'complete',
+      data: summaryToStore
+    });
+
+  } catch (error) {
+    logger.error(`[CASE SUMMARY ASYNC JOB: ${jobId}] Error during async summary generation for ${silknotePatientUuid}:`, error);
+    io.to(patientRoom).emit('caseSummaryError', {
+      patientId: silknotePatientUuid,
+      jobId,
+      status: 'error',
+      error: error instanceof Error ? error.message : 'Failed to generate case summary'
+    });
+  }
+}
 
 /**
  * Generates a comprehensive case summary using multiple targeted vector store queries
@@ -1591,7 +1645,7 @@ router.get('/:silknotePatientUuid', asyncHandler(async (req: Request, res: Respo
 router.post('/:silknotePatientUuid', asyncHandler(async (req: Request, res: Response) => {
   const { silknotePatientUuid } = req.params;
   // Assume req.body is the FULL CaseSummaryApiResponse structure
-  const caseSummaryDataToSave: SharedCaseSummaryApiResponse = req.body;
+  const caseSummaryDataToSave: CaseSummaryApiResponse = req.body;
 
   // Basic validation on received data
   if (!caseSummaryDataToSave || typeof caseSummaryDataToSave !== 'object' || !caseSummaryDataToSave.summary) {
@@ -1609,7 +1663,7 @@ router.post('/:silknotePatientUuid', asyncHandler(async (req: Request, res: Resp
     
     // Add the case summary to the patient record
     // Ensure counts from the *saved* data are preserved if they exist, otherwise use patient's current count
-    const finalSummaryToSave: SharedCaseSummaryApiResponse = {
+    const finalSummaryToSave: CaseSummaryApiResponse = {
         ...caseSummaryDataToSave,
         summaryGenerationCount: caseSummaryDataToSave.summaryGenerationCount ?? patient.summaryGenerationCount ?? 0,
         maxCount: caseSummaryDataToSave.maxCount ?? 5
@@ -1661,12 +1715,12 @@ router.get('/patients/:silknotePatientUuid/case-summary', asyncHandler(async (re
     }
     
     // *** TEMPORARY FIX: Align response with CaseSummaryApiResponse *** 
-    const fullCaseSummary = patient.caseSummary as SharedCaseSummaryApiResponse | null;
+    const fullCaseSummary = patient.caseSummary as CaseSummaryApiResponse | null;
     if (!fullCaseSummary || !fullCaseSummary.summary) {
       return res.status(500).json({ error: 'Invalid case summary data stored for patient' });
     }
     let parsedSummary = parseCaseSummary(fullCaseSummary.summary) || fullCaseSummary.summary;
-    const response: SharedCaseSummaryApiResponse = {
+    const response: CaseSummaryApiResponse = {
       summary: parsedSummary,
       citations: fullCaseSummary.citations || [],
       summaryGenerationCount: patient.summaryGenerationCount || 0,

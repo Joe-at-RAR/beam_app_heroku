@@ -1,6 +1,7 @@
 import { MedicalDocument } from '../shared/types';
 import { SocketErrorCode } from '../middleware/error-handler';
 import { DisconnectReason } from 'socket.io';
+import { CaseSummaryApiResponse } from '../shared/types';
 
 /**
  * Server -> Client Events
@@ -24,6 +25,39 @@ export interface ServerToClientEvents {
   // Processing stage events
   'processingStage': (data: ProcessingStageEvent) => void;
   'analysisProgress': (data: AnalysisProgressEvent) => void;
+
+  // For case summary updates
+  caseSummaryStatus: (data: {
+    patientId: string;
+    jobId: string;
+    status: 'processing' | 'retrying';
+    message: string;
+    progress?: number;
+  }) => void;
+
+  caseSummaryComplete: (data: {
+    patientId: string;
+    jobId: string;
+    status: 'complete';
+    data: CaseSummaryApiResponse;
+  }) => void;
+
+  caseSummaryError: (data: {
+    patientId: string;
+    jobId: string;
+    status: 'error';
+    error: string;
+    details?: any;
+  }) => void;
+
+  // Example: for document processing updates (you might already have something like this)
+  documentStatusUpdate: (data: { 
+    documentId: string; 
+    patientId: string;
+    status: string; 
+    message?: string;
+    progress?: number;
+  }) => void; 
 }
 
 /**
@@ -48,6 +82,8 @@ export interface SocketData {
     id: string;
     role: string;
   };
+  userId?: string; // from socketAuth
+  username?: string; // from socketAuth
 }
 
 /**
