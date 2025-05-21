@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, NextFunction } from "express";
 import { getPatientById, updatePatient } from "../services/patientService";
 import { AzureOpenAI } from 'openai';
 import * as patientService from '../services/patientService';
@@ -511,45 +511,51 @@ export async function queryAssistantWithCitationsObject(
 }
 
 
-router.get('/generate/:silknotePatientUuid', asyncHandler(async (req: Request, res: Response) => {
+router.get('/generate/:silknotePatientUuid', asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   const { silknotePatientUuid } = req.params;
-  // Assuming socketAuth middleware or similar authentication mechanism adds user to req.
-  // For robust user identification, ensure req.user.id or a similar property is available.
-  // If not, you might need to adjust how requesterId is obtained or handle anonymous requests if applicable.
   const requesterId = (req as any).user?.id || 'unknown_requester'; 
-
+  
   logger.info(`[CASE SUMMARY] Received request to generate summary for patient: ${silknotePatientUuid} by ${requesterId}`);
-
+  
   try {
     const patient = await getPatientById(silknotePatientUuid);
     if (!patient) {
       logger.warn(`[CASE SUMMARY] Patient not found for generation: ${silknotePatientUuid}`);
       return res.status(404).json({ error: 'Patient not found' });
     }
-
+    
     const patientDocuments = patient.fileSet || [];
     if (patientDocuments.length === 0) {
       logger.warn(`[CASE SUMMARY] No documents found for patient: ${silknotePatientUuid}`);
       return res.status(400).json({ error: 'No documents found for patient, cannot generate summary.' });
     }
 
-    // 1. Respond to HTTP request immediately
     const jobTicket = {
       patientId: silknotePatientUuid,
       status: 'pending',
       message: 'Case summary generation has started.',
       timestamp: new Date().toISOString(),
-      jobId: randomUUID() // Add a unique job ID
+      jobId: randomUUID()
     };
     res.status(202).json(jobTicket);
 
-    // 2. Perform the long-running task asynchronously (DO NOT await here)
     generateAndNotify(silknotePatientUuid, requesterId, jobTicket.jobId);
 
   } catch (error) {
     logger.error(`[CASE SUMMARY] Error initiating summary generation for patient ${silknotePatientUuid}:`, error);
+    // If an error occurs here, it should be passed to the Express error handler by asyncHandler
+    // So, we call next(error) if we want to explicitly pass it, 
+    // or let asyncHandler handle it if it's a promise rejection.
+    // Since this is a try/catch block within the async function, 
+    // if we don't send a response, we should call next(error).
+    // However, if headersSent is true, we can't send another response.
     if (!res.headersSent) {
-        return res.status(500).json({ error: 'Failed to initiate case summary generation' });
+      // Let asyncHandler propagate the error
+      return next(error); 
+    } else {
+      // If headers already sent (e.g. the 202), just log. 
+      // The background task will handle its own error notifications via WebSocket.
+      console.error("[CASE SUMMARY] Headers already sent, cannot propagate error to Express for /generate endpoint initial phase.");
     }
   }
 }));
