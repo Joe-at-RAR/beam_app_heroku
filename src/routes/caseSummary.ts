@@ -846,6 +846,45 @@ function ensureValidCaseSummaryFormat(summary: any): CaseSummaryType {
   // Helper to validate an array – returns [] if not a valid array
   const safeArray = (value: any) => (Array.isArray(value) ? value : []);
 
+  // Deep-sanitise array items so that required primitive fields always exist
+  const sanitiseDiagnoses = (arr: any[]): any[] => safeArray(arr).map((d) => ({
+    id: String(d && d.id ? d.id : randomUUID()),
+    condition: d?.condition ?? null,
+    status: String(d?.status ?? ''),
+    diagnosisDate: d?.diagnosisDate ?? null,
+    notes: d?.notes ?? null,
+  }));
+
+  const sanitiseTreatments = (arr: any[]): any[] => safeArray(arr).map((t) => ({
+    id: String(t && t.id ? t.id : randomUUID()),
+    treatment: t?.treatment ?? null,
+    date: t?.date ?? null,
+    provider: t?.provider ?? null,
+    type: String(t?.type ?? ''),
+    notes: t?.notes ?? null,
+  }));
+
+  const sanitiseTestResults = (arr: any[]): any[] => safeArray(arr).map((tr) => ({
+    id: String(tr && tr.id ? tr.id : randomUUID()),
+    testName: tr?.testName ?? null,
+    date: tr?.date ?? null,
+    result: tr?.result ?? null,
+    range: tr?.range ?? null,
+  }));
+
+  const sanitiseKeyEvents = (arr: any[]): any[] => safeArray(arr).map((e) => ({
+    id: String(e && e.id ? e.id : randomUUID()),
+    eventType: e?.eventType ?? null,
+    eventDate: e?.eventDate ?? null,
+    eventTitle: e?.eventTitle ?? null,
+    eventDescription: e?.eventDescription ?? null,
+    providers: safeArray(e?.providers),
+    workCapacity: e?.workCapacity ?? null,
+    documents: safeArray(e?.documents),
+    significance: e?.significance ?? null,
+    notes: e?.notes ?? null,
+  }));
+
   // Merge the provided summary with the blank defaults, then re-validate array fields
   const merged = {
     ...blankSummary,
@@ -877,10 +916,10 @@ function ensureValidCaseSummaryFormat(summary: any): CaseSummaryType {
     workRelatedInjury: typeof merged.workRelatedInjury === "boolean" ? merged.workRelatedInjury : false,
 
     // Arrays – guaranteed to be arrays
-    diagnoses: safeArray(merged.diagnoses),
-    keyEvents: safeArray(merged.keyEvents),
-    treatments: safeArray(merged.treatments),
-    testResults: safeArray(merged.testResults),
+    diagnoses: sanitiseDiagnoses(merged.diagnoses),
+    keyEvents: sanitiseKeyEvents(merged.keyEvents),
+    treatments: sanitiseTreatments(merged.treatments),
+    testResults: sanitiseTestResults(merged.testResults),
     medicalHistory: safeArray(merged.medicalHistory),
     medicalTimeline: safeArray(merged.medicalTimeline),
 
