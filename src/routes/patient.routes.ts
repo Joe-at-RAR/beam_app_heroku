@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express'
 import fs from 'fs'
 import path from 'path'
 import { v4 as uuidv4 } from 'uuid'
+import cors from 'cors'
 
 import config from '../config'
 import { MedicalDocument, DocumentType, PatientDetails, DocumentAlertType } from '../shared/types'
@@ -62,6 +63,9 @@ async function quickStore(
 
   return doc;
 }
+
+// CORS pre-flight for the upload route
+router.options('/:silknotePatientUuid/process', cors());
 
 // GET / - fetch all patients
 router.get('/', async (req, res) => {
