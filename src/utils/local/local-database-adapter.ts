@@ -126,7 +126,7 @@ export function createLocalDatabaseAdapter(): DatabaseAdapter {
       if (isInitialized) return { success: true, errors: [] };
       logger.info('Initializing Local DB Adapter...');
       dbFilePath = path.join(config.processing.outputDir, DB_FILE_NAME);
-      try {
+            try {
         await fs.mkdir(path.dirname(dbFilePath), { recursive: true });
         await loadDatabase();
         isInitialized = true;
@@ -146,7 +146,7 @@ export function createLocalDatabaseAdapter(): DatabaseAdapter {
       const userPatients = getUserPatientsCollection(silknoteUserUuid);
       if (!userPatients[silknotePatientUuid]) {
         logger.warn(`[LOCAL_DB] saveDocument: Patient ${silknotePatientUuid} for user ${silknoteUserUuid} not found.`);
-        return false;
+         return false;
       }
       const patient = userPatients[silknotePatientUuid];
       if (!patient.fileSet) patient.fileSet = [];
@@ -248,9 +248,9 @@ export function createLocalDatabaseAdapter(): DatabaseAdapter {
         return false;
       }
       userPatients[silknotePatientUuid] = { 
-        ...existingPatient, 
+        ...existingPatient,
         ...patientUpdates,
-        silknotePatientUuid: silknotePatientUuid, 
+        silknotePatientUuid: silknotePatientUuid,
         silknoteUserUuid: silknoteUserUuid,     
       };
       await saveDatabase();
@@ -264,7 +264,7 @@ export function createLocalDatabaseAdapter(): DatabaseAdapter {
       if (userPatients[silknotePatientUuid]) {
         delete userPatients[silknotePatientUuid];
         await saveDatabase();
-        return true;
+        return true; 
       }
       return false;
     },
@@ -295,7 +295,7 @@ export function createLocalDatabaseAdapter(): DatabaseAdapter {
         if (alert.type === alertType && !alert.acknowledged) {
           alertFoundAndUpdated = true;
           return { ...alert, acknowledged: true, acknowledgedAt: new Date().toISOString() };
-        }
+      }
         return alert;
       });
       if (alertFoundAndUpdated) {
@@ -335,17 +335,17 @@ export function createLocalDatabaseAdapter(): DatabaseAdapter {
     async resetProcessingDocuments(): Promise<number> {
       if (!isInitialized) throw new Error('Adapter not initialized');
       logger.info('[LOCAL_DB] resetProcessingDocuments (global)');
-      let count = 0;
+        let count = 0;
       Object.values(localDb.users).forEach(userCollection => {
         Object.values(userCollection.patients).forEach(patient => {
           if (patient.fileSet) {
             patient.fileSet.forEach(doc => {
               if (doc.status === 'processing') {
-                doc.status = 'queued';
-                count++;
-              }
-            });
-          }
+                    doc.status = 'queued';
+                    count++;
+                }
+             });
+        }
         });
       });
       if (count > 0) await saveDatabase();
@@ -358,10 +358,10 @@ export function createLocalDatabaseAdapter(): DatabaseAdapter {
       const userPatients = getUserPatientsCollection(silknoteUserUuid);
       const patient = userPatients[silknotePatientUuid];
       if (!patient || !patient.fileSet) return 0;
-      let count = 0;
+        let count = 0;
       patient.fileSet.forEach(doc => {
-        doc.status = 'queued';
-        count++;
+                    doc.status = 'queued';
+                    count++;
       });
       if (count > 0) await saveDatabase(); // No need to reassign patient as its fileset was mutated directly
       return count;
@@ -378,6 +378,6 @@ export function createLocalDatabaseAdapter(): DatabaseAdapter {
 function getUserPatients(silknoteUserUuid: string): { [patientUuid: string]: PatientDetails } {
     if (!localDb.users[silknoteUserUuid]) {
         localDb.users[silknoteUserUuid] = { patients: {} };
-    }
+                    }
     return localDb.users[silknoteUserUuid].patients;
 } 

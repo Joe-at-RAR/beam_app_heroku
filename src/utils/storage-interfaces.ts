@@ -33,7 +33,7 @@ export interface FileStorageAdapter {
  */
 export interface DatabaseAdapter {
   initialize(): Promise<{ success: boolean; errors: StorageError[] }>;
-
+  
   // Document operations scoped by user and patient
   // 'documentId' here typically refers to clientFileId for fetch/delete, 
   // or is part of the MedicalDocument object for save/update.
@@ -43,7 +43,7 @@ export interface DatabaseAdapter {
   deleteDocument(silknoteUserUuid: string, silknotePatientUuid: string, clientFileId: string): Promise<boolean>;
   getDocumentsForPatient(silknoteUserUuid: string, silknotePatientUuid: string): Promise<MedicalDocument[]>;
   addDocumentToPatient(silknoteUserUuid: string, silknotePatientUuid: string, document: MedicalDocument): Promise<boolean>;
-
+  
   // Patient operations scoped by user (owner/accessor)
   // 'patientDetails' includes the silknotePatientUuid for save/update.
   savePatient(silknoteUserUuid: string, patientDetails: PatientDetails): Promise<boolean>; // userUuid is the owner
@@ -64,4 +64,4 @@ export interface DatabaseAdapter {
   resetProcessingDocuments?(): Promise<number>; // Potentially global admin task, may not need scoping here unless resetting for a specific user/patient.
   forceReprocessPatientDocuments?(silknoteUserUuid: string, silknotePatientUuid: string): Promise<number>;
   forceReprocessDocument?(silknoteUserUuid: string, silknotePatientUuid: string, silknoteDocumentUuid: string): Promise<boolean>;
-}
+} 

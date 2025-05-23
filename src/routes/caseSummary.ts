@@ -838,11 +838,11 @@ function ensureValidCaseSummaryFormat(summary: any): CaseSummaryType {
     employmentNotes: "",
     legalNotes: "",
     medicalInconsistencies: {
-      hasInconsistencies: false,
-      inconsistencies: []
+      hasInconsistencies: false, 
+      inconsistencies: [] 
     }
   } as unknown as CaseSummaryType;
-
+  
   // Helper to validate an array – returns [] if not a valid array
   const safeArray = (value: any) => (Array.isArray(value) ? value : []);
 

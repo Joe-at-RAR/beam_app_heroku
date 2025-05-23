@@ -9,11 +9,15 @@
   },
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js",
-    "dev": "tsc-watch --onSuccess \"node dist/index.js\"",
+    "start": "node dist/src/index.js",
+    "dev": "tsc-watch --onSuccess \"node dist/src/index.js\"",
     "test": "jest",
     "prisma:generate": "prisma generate",
-    "heroku-postbuild": "pnpm run prisma:generate && pnpm run build"
+    "prisma:migrate": "prisma migrate deploy",
+    "heroku-postbuild": "pnpm run prisma:generate && pnpm run build",
+    "package": "node build.js",
+    "package:unix": "chmod +x build.sh && ./build.sh",
+    "package:win": "build.bat"
   },
   "dependencies": {
     "@azure/ai-form-recognizer": "^5.0.0",

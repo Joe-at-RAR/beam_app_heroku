@@ -959,7 +959,7 @@ export const documentService = {
       // This is a double check, primary check should be in the DB query via storageService.
       if (silknotePatientUuid && document.silknotePatientUuid !== silknotePatientUuid) {
         logger.warn(`[DOCUMENT SERVICE] Document ${decodedDocumentId} found, but does not belong to patient ${silknotePatientUuid}. Belongs to: ${document.silknotePatientUuid}`);
-        return null;
+    return null;
       }
       logger.info(`[DOCUMENT SERVICE] Found document for clientFileId ${decodedDocumentId} via storageService.`);
       return document; 

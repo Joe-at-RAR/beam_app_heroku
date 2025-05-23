@@ -60,9 +60,9 @@ function mapPrismaDocumentToMedicalDocument(
         (content as any).error = "Failed to parse content";
         (content as any).details = (e as Error).message;
     }
-
-    let alerts: DocumentAlert[] = [];
-    try {
+     
+     let alerts: DocumentAlert[] = [];
+     try {
         if (prismaDoc.alertsJson) {
             alerts = JSON.parse(prismaDoc.alertsJson);
             if (!Array.isArray(alerts)) alerts = [];
@@ -106,7 +106,7 @@ function mapPrismaDocumentToMedicalDocument(
         return undefined;
     };
 
-    const medicalDoc: MedicalDocument = {
+     const medicalDoc: MedicalDocument = {
         silknoteDocumentUuid: prismaDoc.silknoteDocumentUuid,
         clientFileId: prismaDoc.clientFileId || '', // Provide default empty string if null
         silknotePatientUuid: prismaDoc.patientUuid,
@@ -117,7 +117,7 @@ function mapPrismaDocumentToMedicalDocument(
         type: prismaDoc.mimeType, 
         size: prismaDoc.sizeBytes ?? 0,
         title: prismaDoc.title ?? prismaDoc.originalName,
-        format: { 
+        format: {
             mimeType: prismaDoc.mimeType, 
             extension: path.extname(prismaDoc.originalName).replace(/^\./, '') || 'pdf'
         },
@@ -128,14 +128,14 @@ function mapPrismaDocumentToMedicalDocument(
         processedAt: toISOStringOptional(prismaDoc.processedAt),
         author: prismaDoc.author ?? '',
         sourceSystem: prismaDoc.sourceSystem ?? 'upload',
-        filename: prismaDoc.originalName, 
+        filename: prismaDoc.originalName,
         confidence: (prismaDoc as any).confidence ?? 0,
-        content: content, 
+        content: content,
         alerts: alerts,
         isIncorrectPatient: isIncorrectPatient,
         detectedPatientInfo: detectedPatientInfo,
-    };
-    return medicalDoc;
+     };
+     return medicalDoc;
 }
 
 function mapPrismaPatientToPatientDetails(
@@ -224,18 +224,18 @@ export function createPrismaAdapter(): DatabaseAdapter {
                 });
                 if (!patientFileSet) {
                     logger.warn(`[PRISMA] saveDocument: Patient ${silknotePatientUuid} not found for user ${silknoteUserUuid}.`);
-                    return false;
-                }
+                return false;
+            }
 
                 const documentData = {
                     patientUuid: silknotePatientUuid,
                     clientFileId: document.clientFileId,
-                    originalName: document.originalName,
-                    storedPath: document.storedPath,
-                    status: document.status,
-                    category: document.category,
-                    mimeType: document.type, 
-                    sizeBytes: document.size,
+                originalName: document.originalName,
+                storedPath: document.storedPath,
+                status: document.status,
+                category: document.category,
+                mimeType: document.type,
+                sizeBytes: document.size,
                     pageCount: document.pageCount ?? 0,
                     documentDate: medicalDateToPrismaInput(document.documentDate),
                     uploadDate: medicalDateToPrismaInput(document.uploadDate) || new Date().toISOString(), 
@@ -255,7 +255,7 @@ export function createPrismaAdapter(): DatabaseAdapter {
                 await prisma.silknoteDocument.upsert({
                     where: { silknoteDocumentUuid: docUuid }, 
                     update: documentData as Prisma.SilknoteDocumentUpdateInput, 
-                    create: { 
+                    create: {
                         ...documentDataWithoutPatientUuid, 
                         silknoteDocumentUuid: docUuid,
                         patientFileset: { connect: { silknotePatientUuid } }
@@ -282,8 +282,8 @@ export function createPrismaAdapter(): DatabaseAdapter {
                 return mapPrismaDocumentToMedicalDocument(prismaDoc);
             } catch (error: any) {
                 logger.error(`[PRISMA] Error in getDocument for clientFileId '${clientFileId}':`, error);
-                return null;
-            }
+                 return null;
+             }
         },
 
         async updateDocument(silknoteUserUuid: string, silknotePatientUuid: string, document: MedicalDocument): Promise<boolean> {
@@ -441,8 +441,8 @@ export function createPrismaAdapter(): DatabaseAdapter {
                 return patientFilesets.map(pf => mapPrismaPatientToPatientDetails(pf)).filter(p => p !== null) as PatientDetails[];
             } catch (error: any) {
                 logger.error(`[PRISMA] Error in getAllPatients for user '${silknoteUserUuid}':`, error);
-                return [];
-            }
+                 return [];
+             }
         },
 
         async updatePatient(silknoteUserUuid: string, silknotePatientUuid: string, patientUpdates: Partial<PatientDetails>): Promise<boolean> {
@@ -468,7 +468,7 @@ export function createPrismaAdapter(): DatabaseAdapter {
                 return updateResult.count > 0;
             } catch (error: any) {
                 logger.error(`[PRISMA] Error in updatePatient for patient '${silknotePatientUuid}':`, error);
-                return false;
+                 return false;
             }
         },
 
@@ -498,7 +498,7 @@ export function createPrismaAdapter(): DatabaseAdapter {
                 return false;
             }
         },
-        
+
         async acknowledgeDocumentAlert(silknoteUserUuid: string, silknotePatientUuid: string, silknoteDocumentUuid: string, alertType: DocumentAlertType): Promise<boolean> {
             logger.info(`[PRISMA] acknowledgeDocumentAlert for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}, docUuid: ${silknoteDocumentUuid}, alertType: ${alertType}`);
             try {
@@ -524,8 +524,8 @@ export function createPrismaAdapter(): DatabaseAdapter {
 
                 if (!alertFoundAndUpdated) {
                     logger.info(`[PRISMA] ack Alert: Type ${alertType} not found or already ack for doc ${silknoteDocumentUuid}.`);
-                    return false; 
-                }
+                  return false;
+             }
 
                 await prisma.silknoteDocument.update({
                     where: { silknoteDocumentUuid: silknoteDocumentUuid },
@@ -548,10 +548,10 @@ export function createPrismaAdapter(): DatabaseAdapter {
                     select: { clientFileId: true } 
                 });
                 return documents.map(doc => doc.clientFileId).filter(id => !!id) as string[];
-            } catch (error) {
+             } catch (error) {
                 logger.error(`[PRISMA] Error fetching queued documents for patient ${silknotePatientUuid}, user ${silknoteUserUuid}`, error);
                 return [];
-            }
+             }
         },
 
         async setDocumentStatus(silknoteUserUuid: string, silknotePatientUuid: string, silknoteDocumentUuid: string, status: string): Promise<boolean> {
@@ -559,18 +559,18 @@ export function createPrismaAdapter(): DatabaseAdapter {
             try {
                 const updateResult = await prisma.silknoteDocument.updateMany({
                     where: { silknoteDocumentUuid, patientUuid: silknotePatientUuid, patientFileset: { silknoteUserUuid } },
-                    data: { status: status }
-                });
+                      data: { status: status }
+                  });
                 return updateResult.count > 0;
-            } catch (error: any) {
+              } catch (error: any) {
                 logger.error(`[PRISMA] Error setting document status for docUuid ${silknoteDocumentUuid}`, error);
-                return false;
-            }
+                 return false;
+              }
         },
 
         async resetProcessingDocuments(): Promise<number> {
             logger.info(`[PRISMA] resetProcessingDocuments (global)`);
-            try {
+             try {
                 const updateResult = await prisma.silknoteDocument.updateMany({
                     where: { status: 'processing' },
                     data: { status: 'queued' }
@@ -578,8 +578,8 @@ export function createPrismaAdapter(): DatabaseAdapter {
                 return updateResult.count;
             } catch (error: any) {
                 logger.error(`[PRISMA] Error resetting processing documents`, error);
-                return 0;
-            }
+                 return 0;
+             }
         },
 
         async forceReprocessPatientDocuments(silknoteUserUuid: string, silknotePatientUuid: string): Promise<number> {
@@ -592,8 +592,8 @@ export function createPrismaAdapter(): DatabaseAdapter {
                 return updateResult.count;
             } catch (error: any) {
                 logger.error(`[PRISMA] Error in forceReprocessPatientDocuments for patient ${silknotePatientUuid}`, error);
-                return 0;
-            }
+                 return 0;
+             }
         },
 
         async forceReprocessDocument(silknoteUserUuid: string, silknotePatientUuid: string, silknoteDocumentUuid: string): Promise<boolean> {
@@ -699,7 +699,7 @@ export function createPrismaAdapter(): DatabaseAdapter {
             }
             try {
                 const existingDoc = await prisma.silknoteDocument.findFirst({
-                    where: {
+                    where: { 
                         silknoteDocumentUuid: docUuid,
                         patientUuid: silknotePatientUuid,
                         patientFileset: { silknoteUserUuid: silknoteUserUuid }
@@ -711,7 +711,7 @@ export function createPrismaAdapter(): DatabaseAdapter {
                     logger.warn(`[PRISMA] updateDocument: Doc ${docUuid} (client: ${document.clientFileId}) not found or not owned.`);
                     return false;
                 }
-                
+
                 const documentDataToUpdate: Omit<Prisma.SilknoteDocumentUpdateInput, 'patientFileset' | 'patientUuid'> = {
                     clientFileId: document.clientFileId,
                     originalName: document.originalName,
