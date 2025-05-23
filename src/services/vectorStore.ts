@@ -28,6 +28,7 @@ declare module '../shared/vectorStore' {
 export async function processDocumentsForVectorStore(
   files: File[],
   silknotePatientUuid: string,
+  silknoteUserUuid: string,
   clientFileIds?: Record<string, string>
 ): Promise<{
   success: boolean
@@ -39,6 +40,12 @@ export async function processDocumentsForVectorStore(
     status: string
   }>
 }> {
+  console.log('[VECTOR STORE] Processing documents for vector store', {
+    fileCount: files.length,
+    patientId: silknotePatientUuid,
+    userUuid: silknoteUserUuid
+  })
+
   try {
     // Log important instructions about clientFileIds parameter
     console.log(`[VECTOR STORE] Processing documents for patient ${silknotePatientUuid}`);
@@ -48,7 +55,7 @@ export async function processDocumentsForVectorStore(
       console.log(`[VECTOR STORE] No clientFileIds mapping provided - using filename as clientFileId`);
     }
 
-    const patient = await patientService.getPatientById(silknotePatientUuid);
+    const patient = await patientService.getPatientById(silknotePatientUuid, silknoteUserUuid);
     if (!patient) throw new Error('Patient not found');
 
     // Get or initialize vector store
@@ -177,30 +184,38 @@ export async function processDocumentsForVectorStore(
 
 export async function queryVectorStore(
   silknotePatientUuid: string,
-  query: string
+  query: string,
+  silknoteUserUuid: string
 ): Promise<{ threadId: string; runId: string }> {
-  const patient = await patientService.getPatientById(silknotePatientUuid);
-  if (!patient) throw new Error('Patient not found');
-  if (!patient.vectorStore?.assistantId) {
-    throw new Error('No vector store assistant configured for patient');
+  console.log('[VECTOR STORE] Querying vector store for patient:', silknotePatientUuid)
+
+  try {
+    const patient = await patientService.getPatientById(silknotePatientUuid, silknoteUserUuid);
+    if (!patient) throw new Error('Patient not found');
+    if (!patient.vectorStore?.assistantId) {
+      throw new Error('No vector store assistant configured for patient');
+    }
+
+    const thread = await openai.beta.threads.create();
+    await openai.beta.threads.messages.create(thread.id, {
+      role: 'user',
+      content: query,
+    });
+
+    const run = await openai.beta.threads.runs.create(thread.id, {
+      assistant_id: patient.vectorStore.assistantId,
+    });
+
+    console.log(JSON.stringify(run, null, 2));
+
+    return {
+      threadId: thread.id,
+      runId: run.id,
+    };
+  } catch (error) {
+    console.error('Error in queryVectorStore:', error);
+    throw error;
   }
-
-  const thread = await openai.beta.threads.create();
-  await openai.beta.threads.messages.create(thread.id, {
-    role: 'user',
-    content: query,
-  });
-
-  const run = await openai.beta.threads.runs.create(thread.id, {
-    assistant_id: patient.vectorStore.assistantId,
-  });
-
-  console.log(JSON.stringify(run, null, 2));
-
-  return {
-    threadId: thread.id,
-    runId: run.id,
-  };
 }
 
 // export async function refineSummaryWithVectorStore(
@@ -497,15 +512,24 @@ export async function queryVectorStore(
 export async function queryAssistantWithCitations(
   silknotePatientUuid: string,
   query: string,
-  outputFormat: string = 'text' // Default to text
+  outputFormat: string = 'text', // Default to text
+  silknoteUserUuid: string
 ): Promise<{ content: string; citations: any[] }> {
-  console.log(`[VECTOR STORE - queryAssistantWithCitations] Starting query for patient ${silknotePatientUuid}`);
+  console.log(`[VECTOR STORE - queryAssistantWithCitations] Query for patient ${silknotePatientUuid}: "${query}"`);
   
-  const patient = await patientService.getPatientById(silknotePatientUuid);
-  if (!patient?.vectorStore?.assistantId) {
-    const errorMsg = !patient
-      ? `Patient with ID ${silknotePatientUuid} not found.`
-      : 'No vector store or assistant configured for this patient.';
+  if (!silknotePatientUuid || !query) {
+    throw new Error('Missing required parameters for queryAssistantWithCitations');
+  }
+
+  // Get patient data
+  const patient = await patientService.getPatientById(silknotePatientUuid, silknoteUserUuid);
+  if (!patient) {
+    throw new Error(`Patient with ID ${silknotePatientUuid} not found`);
+  }
+  if (!patient.vectorStore?.assistantId) {
+    const errorMsg = !patient.vectorStore
+      ? 'No vector store configured for this patient.'
+      : 'No assistant configured for this patient vector store.';
     console.error(`[VECTOR STORE - queryAssistantWithCitations] Error: ${errorMsg}`);
     throw new Error(errorMsg);
   }
@@ -519,12 +543,13 @@ export async function queryAssistantWithCitations(
   // System message (less critical now as annotations drive citation details)
   let systemMessage = '';
   if (outputFormat === 'json') {
-    systemMessage = `Please provide citations using annotations.`; // Simplified instruction
+    systemMessage = `
+      For each citation, include the reference inline using the format 【citation_index:position†filename】.
+      Example: "The patient was diagnosed with hypertension【1:0†medical_report.pdf】."
+    `;
   }
 
   const thread = await openai.beta.threads.create();
-  console.log(`[VECTOR STORE - queryAssistantWithCitations] Created thread ${thread.id}`);
-
   if (systemMessage) {
     await openai.beta.threads.messages.create(thread.id, { role: 'user', content: systemMessage });
   }
@@ -613,7 +638,7 @@ export async function queryAssistantWithCitations(
                 
                 // 3. Retrieve the MedicalDocument containing analysis results
                 if (clientFileId) {
-                  medicalDocument = await storageService.getDocument(clientFileId);
+                  medicalDocument = await storageService.getDocument(silknoteUserUuid, silknotePatientUuid, clientFileId);
                   if (!medicalDocument) {
                     console.error(`[VECTOR STORE - CITATION ${i+1}] Failed to retrieve MedicalDocument for clientFileId: ${clientFileId}`);
                   }
@@ -944,11 +969,12 @@ export async function queryAssistantWithCitations(
 
 export async function removeFileFromVectorStore(
   silknotePatientUuid: string,
-  clientFileId: string
+  clientFileId: string,
+  silknoteUserUuid: string
 ): Promise<boolean> {
   console.log(`[VECTOR STORE] Attempting to remove file ${clientFileId} from vector store for patient ${silknotePatientUuid}`);
   try {
-    const patient = await patientService.getPatientById(silknotePatientUuid);
+    const patient = await patientService.getPatientById(silknotePatientUuid, silknoteUserUuid);
     if (!patient) {
       console.error(`[VECTOR STORE] Patient ${silknotePatientUuid} not found.`);
       return false;

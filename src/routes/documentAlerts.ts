@@ -27,19 +27,26 @@ router.post('/acknowledge', asyncHandler(async (req: Request, res: Response) => 
         return res.status(400).json({ error: `Invalid alertType. Must be one of: ${Object.values(DocumentAlertType).join(', ')}` });
     }
 
-    logger.info(`Received request to acknowledge alert:`, { patientId, documentId, alertType });
+    // Get user UUID from headers
+    const silknoteUserUuid = req.headers['x-silknote-user-uuid'] as string || req.headers['silknote-user-uuid'] as string;
+    
+    if (!silknoteUserUuid) {
+        logger.warn('Missing silknoteUserUuid in request headers');
+        return res.status(400).json({ error: 'Missing required header: silknote-user-uuid' });
+    }
+
+    logger.info(`Received request to acknowledge alert:`, { patientId, documentId, alertType, silknoteUserUuid });
 
     try {
         // Use the dbAdapter from storageService
-        // Assuming the dbAdapter interface and implementation exist and are correctly typed
-        const success = await storageService.dbAdapter.acknowledgeDocumentAlert(patientId, documentId, alertType as DocumentAlertType);
+        const success = await storageService.dbAdapter.acknowledgeDocumentAlert(silknoteUserUuid, patientId, documentId, alertType as DocumentAlertType);
 
         if (success) {
-            logger.info(`Successfully processed acknowledge request for alert type ${alertType}`, { patientId, documentId });
+            logger.info(`Successfully processed acknowledge request for alert type ${alertType}`, { patientId, documentId, silknoteUserUuid });
             return res.status(200).json({ success: true, message: 'Alert acknowledged successfully.' });
         } else {
             // Log reason for failure if possible (e.g., patient/doc not found, already acknowledged)
-            logger.warn(`Failed to acknowledge alert type ${alertType} (see adapter logs for details)`, { patientId, documentId });
+            logger.warn(`Failed to acknowledge alert type ${alertType} (see adapter logs for details)`, { patientId, documentId, silknoteUserUuid });
             // Return a generic error, or more specific based on adapter feedback if available
             return res.status(404).json({ success: false, error: 'Failed to acknowledge alert. Document or patient not found, or alert already acknowledged.' }); 
         }

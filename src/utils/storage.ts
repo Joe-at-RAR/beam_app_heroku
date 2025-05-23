@@ -294,18 +294,18 @@ export class StorageService {
   }
 
   // --- VSRX Specific Document Addition ---
-  async addDocumentReference(patientUUID: string, filePath: string, originalName: string, uploadDate?: Date, optionalMetadata: Partial<MedicalDocument> = {}): Promise<{ success: boolean; documentId?: string; error?: string }> {
+  async addDocumentReference(silknoteUserUuid: string, patientUUID: string, filePath: string, originalName: string, uploadDate?: Date, optionalMetadata: Partial<MedicalDocument> = {}): Promise<{ success: boolean; documentId?: string; error?: string }> {
     if (process.env['VSRX_MODE'] !== 'true') {
       return { success: false, error: "System not configured for VSRX mode." };
     }
     if (!this.initialized) {
       return { success: false, error: "Storage service not initialized." };
     }
-    if (!patientUUID || !filePath || !originalName) {
-      return { success: false, error: "Missing required parameters: patientUUID, filePath, originalName." };
+    if (!silknoteUserUuid || !patientUUID || !filePath || !originalName) {
+      return { success: false, error: "Missing required parameters: silknoteUserUuid, patientUUID, filePath, originalName." };
     }
 
-    logInfo(`VSRX: Received request to add reference: Patient ${patientUUID}, Path ${filePath}`);
+    logInfo(`VSRX: Received request to add reference: User ${silknoteUserUuid}, Patient ${patientUUID}, Path ${filePath}`);
 
     // 1. Validate Path (using the internal method)
     const isValid = await this.isValidVSRXPath(filePath);
@@ -344,7 +344,7 @@ export class StorageService {
       logError('VSRX mode requires DATABASE_TYPE=MYSQL, but it is set to ', this.databaseType);
       return { success: false, error: 'Invalid database configuration for VSRX mode.' };
     }
-    const saved = await this.dbAdapter.addDocumentToPatient(patientUUID, documentData);
+    const saved = await this.dbAdapter.addDocumentToPatient(silknoteUserUuid, patientUUID, documentData);
 
     if (saved) {
       logInfo(`VSRX: Successfully added document reference ${documentId} for path ${absoluteFilePath}`);
@@ -365,30 +365,30 @@ export class StorageService {
     return 0;
   }
 
-  async forceReprocessPatientDocuments(silknotePatientUuid: string): Promise<number> {
+  async forceReprocessPatientDocuments(silknoteUserUuid: string, silknotePatientUuid: string): Promise<number> {
     if (!this.initialized) throw new Error('Storage service not initialized');
     if (typeof (this.dbAdapter as any).forceReprocessPatientDocuments === 'function') {
-      return (this.dbAdapter as any).forceReprocessPatientDocuments(silknotePatientUuid);
+      return (this.dbAdapter as any).forceReprocessPatientDocuments(silknoteUserUuid, silknotePatientUuid);
     }
     logError('forceReprocessPatientDocuments not supported by the current DB adapter.');
     return 0;
   }
 
-  async forceReprocessDocument(documentId: string): Promise<boolean> {
+  async forceReprocessDocument(silknoteUserUuid: string, silknotePatientUuid: string, documentId: string): Promise<boolean> {
     if (!this.initialized) throw new Error('Storage service not initialized');
     if (typeof (this.dbAdapter as any).forceReprocessDocument === 'function') {
-      return (this.dbAdapter as any).forceReprocessDocument(documentId);
+      return (this.dbAdapter as any).forceReprocessDocument(silknoteUserUuid, silknotePatientUuid, documentId);
     }
     logError('forceReprocessDocument not supported by the current DB adapter.');
     return false;
   }
 
   // --- Standard DB Operations (Delegate) ---
-  async saveDocument(document: MedicalDocument): Promise<boolean> {
+  async saveDocument(silknoteUserUuid: string, silknotePatientUuid: string, document: MedicalDocument): Promise<boolean> {
     if (!this.initialized) throw new Error('Storage service not initialized');
-    return this.dbAdapter.saveDocument(document);
+    return this.dbAdapter.saveDocument(silknoteUserUuid, silknotePatientUuid, document);
   }
-  async getDocument(documentId: string, silknotePatientUuid?: string): Promise<MedicalDocument | null> {
+  async getDocument(silknoteUserUuid: string, silknotePatientUuid: string, documentId: string): Promise<MedicalDocument | null> {
     if (!this.initialized) throw new Error('Storage service not initialized');
     
     let contextMessage = `documentId: ${documentId}`;
@@ -404,40 +404,40 @@ export class StorageService {
       logInfo(`storageService.getDocument called with ${contextMessage}`);
     }
     // Pass both arguments to the adapter. The adapter will decide how to use them.
-    return this.dbAdapter.getDocument(documentId, silknotePatientUuid);
+    return this.dbAdapter.getDocument(silknoteUserUuid, silknotePatientUuid, documentId);
   }
-  async updateDocument(document: MedicalDocument): Promise<boolean> {
+  async updateDocument(silknoteUserUuid: string, silknotePatientUuid: string, document: MedicalDocument): Promise<boolean> {
     if (!this.initialized) throw new Error('Storage service not initialized');
-    return this.dbAdapter.updateDocument(document);
+    return this.dbAdapter.updateDocument(silknoteUserUuid, silknotePatientUuid, document);
   }
-  async deleteDocument(documentId: string): Promise<boolean> {
+  async deleteDocument(silknoteUserUuid: string, silknotePatientUuid: string, documentId: string): Promise<boolean> {
     if (!this.initialized) throw new Error('Storage service not initialized');
     // In VSRX, we only delete the DB reference
     logInfo(`Deleting document reference ${documentId} (VSRX mode implies no file deletion)`);
-    return this.dbAdapter.deleteDocument(documentId);
+    return this.dbAdapter.deleteDocument(silknoteUserUuid, silknotePatientUuid, documentId);
   }
-  async savePatient(patient: any): Promise<boolean> {
+  async savePatient(silknoteUserUuid: string, patient: any): Promise<boolean> {
     if (!this.initialized) throw new Error('Storage service not initialized');
-    return this.dbAdapter.savePatient(patient);
+    return this.dbAdapter.savePatient(silknoteUserUuid, patient);
   }
-  async getPatient(silknotePatientUuid: string): Promise<any | null> {
+  async getPatient(silknoteUserUuid: string, silknotePatientUuid: string): Promise<any | null> {
     if (!this.initialized) throw new Error('Storage service not initialized');
-    return this.dbAdapter.getPatient(silknotePatientUuid);
+    return this.dbAdapter.getPatient(silknoteUserUuid, silknotePatientUuid);
   }
-  async getAllPatients(): Promise<any[]> {
+  async getAllPatients(silknoteUserUuid: string): Promise<any[]> {
     if (!this.initialized) throw new Error('Storage service not initialized');
-    return this.dbAdapter.getAllPatients();
+    return this.dbAdapter.getAllPatients(silknoteUserUuid);
   }
-  async updatePatient(patient: any): Promise<boolean> {
+  async updatePatient(silknoteUserUuid: string, silknotePatientUuid: string, patient: any): Promise<boolean> {
     if (!this.initialized) throw new Error('Storage service not initialized');
-    return this.dbAdapter.updatePatient(patient);
+    return this.dbAdapter.updatePatient(silknoteUserUuid, silknotePatientUuid, patient);
   }
-  async deletePatient(silknotePatientUuid: string): Promise<boolean> {
+  async deletePatient(silknoteUserUuid: string, silknotePatientUuid: string): Promise<boolean> {
     if (!this.initialized) throw new Error('Storage service not initialized');
     logInfo(`Deleting patient ${silknotePatientUuid} and associated references (VSRX mode)`);
-    return this.dbAdapter.deletePatient(silknotePatientUuid);
+    return this.dbAdapter.deletePatient(silknoteUserUuid, silknotePatientUuid);
   }
-  async addDocumentToPatient(silknotePatientUuid: string, document: MedicalDocument): Promise<boolean> {
+  async addDocumentToPatient(silknoteUserUuid: string, silknotePatientUuid: string, document: MedicalDocument): Promise<boolean> {
     // This specific method might be less relevant if using addDocumentReference directly
     // If used, ensure it sets status correctly for VSRX
     if (process.env['VSRX_MODE'] === 'true') {
@@ -445,11 +445,11 @@ export class StorageService {
       return false;
     }
     if (!this.initialized) throw new Error('Storage service not initialized');
-    return this.dbAdapter.addDocumentToPatient(silknotePatientUuid, document);
+    return this.dbAdapter.addDocumentToPatient(silknoteUserUuid, silknotePatientUuid, document);
   }
-  async getDocumentsForPatient(silknotePatientUuid: string): Promise<MedicalDocument[]> {
+  async getDocumentsForPatient(silknoteUserUuid: string, silknotePatientUuid: string): Promise<MedicalDocument[]> {
     if (!this.initialized) throw new Error('Storage service not initialized');
-    return this.dbAdapter.getDocumentsForPatient(silknotePatientUuid);
+    return this.dbAdapter.getDocumentsForPatient(silknoteUserUuid, silknotePatientUuid);
   }
 }
 

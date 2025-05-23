@@ -21,7 +21,8 @@ const logger = createLogger('PATIENT_ROUTES');
 async function quickStore(
   file: Express.Multer.File,
   clientFileId: string,
-  patient: PatientDetails // Make sure PatientDetails is imported or defined
+  patient: PatientDetails, // Make sure PatientDetails is imported or defined
+  silknoteUserUuid: string // Add required parameter
 ): Promise<MedicalDocument> {
   // 1. move blob to its final name
   const storedPath = await storageService.finalizeUploadedFile(file.path, clientFileId);
@@ -50,7 +51,7 @@ async function quickStore(
   };
 
   // 3. put stub in DB
-  await patientService.addFileToPatient(patient.silknotePatientUuid, doc);
+  await patientService.addFileToPatient(patient.silknotePatientUuid, doc, silknoteUserUuid);
 
   // 4. socket "stored"
   emitToPatientRoom(patient.silknotePatientUuid, 'fileStatus', {
@@ -79,9 +80,14 @@ router.get('/', async (req, res) => {
       patients = await patientService.getPatientsByUserId(silknoteUserUuid);
       console.log(`Found ${patients.length} patients for silknoteUserUuid: ${silknoteUserUuid}`);
     } else {
-      // Get all patients when no silknoteUserUuid filter is applied
-      patients = await patientService.getPatients();
-      console.log(`Found ${patients.length} patients (no silknoteUserUuid filter)`);
+      // Get silknoteUserUuid from headers when no query param is provided
+      const headerUserUuid = req.headers['x-silknote-user-uuid'] as string || req.headers['silknote-user-uuid'] as string;
+      if (headerUserUuid) {
+        patients = await patientService.getPatients(headerUserUuid);
+        console.log(`Found ${patients.length} patients from header silknoteUserUuid: ${headerUserUuid}`);
+      } else {
+        return res.status(400).json({ error: 'Missing silknote-user-uuid in query parameter or headers' });
+      }
     }
     
     return res.json({ patients });
@@ -94,8 +100,16 @@ router.get('/', async (req, res) => {
 // GET /:silknotePatientUuid - fetch a single patient's details
 router.get('/:silknotePatientUuid', async (req, res) => {
   const silknotePatientUuid = req.params.silknotePatientUuid
+  
+  // Get user UUID from headers
+  const silknoteUserUuid = req.headers['x-silknote-user-uuid'] as string || req.headers['silknote-user-uuid'] as string;
+  
+  if (!silknoteUserUuid) {
+    return res.status(400).json({ error: 'Missing required header: silknote-user-uuid' });
+  }
+  
   try {
-    const patient = await patientService.getPatientById(silknotePatientUuid)
+    const patient = await patientService.getPatientById(silknotePatientUuid, silknoteUserUuid)
     if (!patient) return res.status(404).json({ error: 'Patient not found' })
     return res.json({ patient })
   } catch (error) {
@@ -115,13 +129,20 @@ router.get('/:silknotePatientUuid/files', async (req, res) => {
       return res.status(400).json({ error: 'Patient ID is required' })
     }
     
-    const patient = await patientService.getPatientById(silknotePatientUuid)
+    // Get user UUID from headers
+    const silknoteUserUuid = req.headers['x-silknote-user-uuid'] as string || req.headers['silknote-user-uuid'] as string;
+    
+    if (!silknoteUserUuid) {
+      return res.status(400).json({ error: 'Missing required header: silknote-user-uuid' });
+    }
+    
+    const patient = await patientService.getPatientById(silknotePatientUuid, silknoteUserUuid)
     
     if (!patient) {
       return res.status(404).json({ error: 'Patient not found' })
     }
     
-    const files = await patientService.getFilesForPatient(silknotePatientUuid)
+    const files = await patientService.getFilesForPatient(silknotePatientUuid, silknoteUserUuid)
     
     if (!files || files.length === 0) {
       return res.json({
@@ -225,7 +246,14 @@ router.post(
       return res.status(400).json({ success: false, error: 'No files uploaded' });
     }
 
-    const patient = await patientService.getPatientById(silknotePatientUuid);
+    // Get user UUID from headers
+    const silknoteUserUuid = req.headers['x-silknote-user-uuid'] as string || req.headers['silknote-user-uuid'] as string;
+    
+    if (!silknoteUserUuid) {
+      return res.status(400).json({ success: false, error: 'Missing required header: silknote-user-uuid' });
+    }
+
+    const patient = await patientService.getPatientById(silknotePatientUuid, silknoteUserUuid);
     if (!patient) {
       return res.status(404).json({ success: false, error: 'Patient not found' });
     }
@@ -250,7 +278,7 @@ router.post(
       }
 
       try {
-        const initialDoc = await quickStore(file, clientFileId, patient);
+        const initialDoc = await quickStore(file, clientFileId, patient, silknoteUserUuid);
         docsForAsync.push(initialDoc);
       } catch (err: any) {
         console.error('[PROCESS] 🛑 Sync failure for', file.originalname, err);
@@ -280,7 +308,7 @@ router.post(
           if (pageCount) {
             doc.pageCount = pageCount;
             // Ensure patientService.updateFileForPatient exists and handles this update correctly
-            await patientService.updateFileForPatient(silknotePatientUuid, doc);
+            await patientService.updateFileForPatient(silknotePatientUuid, doc, silknoteUserUuid);
           }
 
           // 2. queue full processing (vector / OpenAI)
@@ -356,8 +384,16 @@ router.post('/', async (req, res) => {
 // DELETE /patients/:silknotePatientUuid - delete a patient and their files
 router.delete('/:silknotePatientUuid', async (req, res) => {
   const { silknotePatientUuid } = req.params
+  
+  // Get user UUID from headers
+  const silknoteUserUuid = req.headers['x-silknote-user-uuid'] as string || req.headers['silknote-user-uuid'] as string;
+  
+  if (!silknoteUserUuid) {
+    return res.status(400).json({ error: 'Missing required header: silknote-user-uuid' });
+  }
+  
   try {
-    const patient = await patientService.getPatientById(silknotePatientUuid)
+    const patient = await patientService.getPatientById(silknotePatientUuid, silknoteUserUuid)
     if (!patient) return res.status(404).json({ error: 'Patient not found' })
 
     const patientDir = path.join(config.processing.outputDir, silknotePatientUuid)
@@ -368,7 +404,7 @@ router.delete('/:silknotePatientUuid', async (req, res) => {
         console.error(`Error deleting patient directory ${patientDir}:`, err)
       }
     }
-    await patientService.deletePatient(silknotePatientUuid)
+    await patientService.deletePatient(silknotePatientUuid, silknoteUserUuid)
     return res.status(204).end()
   } catch (error) {
     console.error('Error deleting patient:', error)
@@ -479,6 +515,13 @@ router.post('/documents/:documentId/reprocess', async (req, res) => {
       return res.status(400).json({ error: 'Document ID is required' })
     }
 
+    // Get user UUID from headers
+    const silknoteUserUuid = req.headers['x-silknote-user-uuid'] as string || req.headers['silknote-user-uuid'] as string;
+    
+    if (!silknoteUserUuid) {
+      return res.status(400).json({ error: 'Missing required header: silknote-user-uuid' });
+    }
+
     console.log(`[PATIENT ROUTES] Reprocessing document: ${documentId}`)
 
     // Find the document across all patients
@@ -488,7 +531,7 @@ router.post('/documents/:documentId/reprocess', async (req, res) => {
     }
 
     const silknotePatientUuid = document.silknotePatientUuid
-    const patient = await patientService.getPatientById(silknotePatientUuid)
+    const patient = await patientService.getPatientById(silknotePatientUuid, silknoteUserUuid)
     if (!patient) {
       return res.status(404).json({ error: 'Patient not found for document' })
     }
@@ -506,7 +549,7 @@ router.post('/documents/:documentId/reprocess', async (req, res) => {
     }
 
     // Update in patient record
-    await patientService.updateFileForPatient(silknotePatientUuid, updatedDocument)
+    await patientService.updateFileForPatient(silknotePatientUuid, updatedDocument, silknoteUserUuid)
 
     // Emit status update
     const room = `patient-${silknotePatientUuid}`
@@ -542,8 +585,16 @@ router.delete('/:patientId/case-summary', asyncHandler(async (req: Request, res:
     const { patientId } = req.params;
     logger.info(`Received request to clear case summary for patient ${patientId}`);
 
+    // Get user UUID from headers
+    const silknoteUserUuid = req.headers['x-silknote-user-uuid'] as string || req.headers['silknote-user-uuid'] as string;
+    
+    if (!silknoteUserUuid) {
+        logger.warn('Missing silknoteUserUuid in request headers');
+        return res.status(400).json({ error: 'Missing required header: silknote-user-uuid' });
+    }
+
     try {
-        const success = await storageService.dbAdapter.clearPatientCaseSummary(patientId);
+        const success = await storageService.dbAdapter.clearPatientCaseSummary(silknoteUserUuid, patientId);
         if (success) {
             logger.info(`Successfully cleared case summary for patient ${patientId}`);
             return res.status(204).send(); // Success, no content

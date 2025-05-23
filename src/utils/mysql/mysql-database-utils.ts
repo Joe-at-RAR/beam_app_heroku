@@ -108,25 +108,25 @@ export function createMySqlDatabaseAdapter(): DatabaseAdapter {
   }
 
   // --- Standalone Queue/VSRX Methods ---
-  async function getQueuedDocuments(limit: number = 10): Promise<string[]> {
+  async function getQueuedDocuments(silknoteUserUuid: string, silknotePatientUuid: string, limit: number = 10): Promise<string[]> {
     if (!isInitialized) throw new Error('Adapter not initialized');
-    logInfo('Fetching queued document IDs', { limit });
-    const sql = "SELECT silknoteDocumentUuid FROM Document WHERE status = 'queued' ORDER BY createdAt ASC LIMIT ?";
+    logInfo('Fetching queued document IDs', { limit, silknotePatientUuid, silknoteUserUuid });
+    const sql = "SELECT silknoteDocumentUuid FROM Document WHERE status = 'queued' AND patientUuid = ? ORDER BY createdAt ASC LIMIT ?";
     try {
-      const rows = await executeQuery<RowDataPacket[]>(sql, [limit]);
+      const rows = await executeQuery<RowDataPacket[]>(sql, [silknotePatientUuid, limit]);
       return rows.map((row: RowDataPacket) => String(row['silknoteDocumentUuid']));
     } catch (error) {
       return [];
     }
   }
 
-  async function setDocumentStatus(silknoteDocumentUuid: string, status: string): Promise<boolean> {
+  async function setDocumentStatus(silknoteUserUuid: string, silknotePatientUuid: string, silknoteDocumentUuid: string, status: string): Promise<boolean> {
      if (!isInitialized) throw new Error('Adapter not initialized');
      if (!silknoteDocumentUuid || !status) return false;
-     logInfo('Setting document status', { silknoteDocumentUuid, status });
-     const sql = 'UPDATE Document SET status = ?, updatedAt = NOW() WHERE silknoteDocumentUuid = ?';
+     logInfo('Setting document status', { silknoteDocumentUuid, status, silknotePatientUuid, silknoteUserUuid });
+     const sql = 'UPDATE Document SET status = ?, updatedAt = NOW() WHERE silknoteDocumentUuid = ? AND patientUuid = ?';
      try {
-         const result = await executeQuery<ResultSetHeader>(sql, [status, silknoteDocumentUuid]);
+         const result = await executeQuery<ResultSetHeader>(sql, [status, silknoteDocumentUuid, silknotePatientUuid]);
          return result.affectedRows > 0;
      } catch (error) {
          return false;
@@ -146,10 +146,10 @@ export function createMySqlDatabaseAdapter(): DatabaseAdapter {
        }
    }
 
-   async function forceReprocessPatientDocuments(silknotePatientUuid: string): Promise<number> {
+   async function forceReprocessPatientDocuments(silknoteUserUuid: string, silknotePatientUuid: string): Promise<number> {
       if (!isInitialized) throw new Error('Adapter not initialized');
       if (!silknotePatientUuid) return 0;
-      logInfo('Forcing reprocess for patient documents', { silknotePatientUuid });
+      logInfo('Forcing reprocess for patient documents', { silknotePatientUuid, silknoteUserUuid });
       const sql = "UPDATE Document SET status = 'queued', updatedAt = NOW() WHERE patientUuid = ? AND status != 'queued'";
       try {
          const result = await executeQuery<ResultSetHeader>(sql, [silknotePatientUuid]);
@@ -160,9 +160,9 @@ export function createMySqlDatabaseAdapter(): DatabaseAdapter {
       }
    }
 
-   async function forceReprocessDocument(silknoteDocumentUuid: string): Promise<boolean> {
+   async function forceReprocessDocument(silknoteUserUuid: string, silknotePatientUuid: string, silknoteDocumentUuid: string): Promise<boolean> {
       if (!isInitialized) throw new Error('Adapter not initialized');
-      return setDocumentStatus(silknoteDocumentUuid, 'queued'); // Now calls the standalone function
+      return setDocumentStatus(silknoteUserUuid, silknotePatientUuid, silknoteDocumentUuid, 'queued');
    }
 
   const adapter: DatabaseAdapter = {
@@ -200,14 +200,11 @@ export function createMySqlDatabaseAdapter(): DatabaseAdapter {
     },
 
     // --- Document Operations --- 
-    // Assumes a `Document` table exists with columns matching `mapDocumentRow` expectations
-    async saveDocument(document: MedicalDocument): Promise<boolean> {
+    async saveDocument(silknoteUserUuid: string, silknotePatientUuid: string, document: MedicalDocument): Promise<boolean> {
         if (!isInitialized) throw new Error('Adapter not initialized');
         // Use silknoteDocumentUuid if present, else clientFileId, else generate new
         const docUuid = document.silknoteDocumentUuid || document.clientFileId || uuidv4(); 
-        // PatientId from shared type now holds the silknotePatientUuid
-        const patientUuid = document.silknotePatientUuid; 
-        logInfo('Saving document', { docUuid, patientUuid });
+        logInfo('Saving document', { docUuid, silknotePatientUuid, silknoteUserUuid });
 
         const sql = `
             INSERT INTO Document 
@@ -218,7 +215,7 @@ export function createMySqlDatabaseAdapter(): DatabaseAdapter {
         `;
         const params = [
             docUuid,
-            patientUuid,
+            silknotePatientUuid,
             document.originalName,
             document.storedPath,
             document.status,
@@ -244,28 +241,28 @@ export function createMySqlDatabaseAdapter(): DatabaseAdapter {
         }
     },
 
-    async getDocument(silknoteDocumentUuid: string): Promise<MedicalDocument | null> {
+    async getDocument(silknoteUserUuid: string, silknotePatientUuid: string, clientFileId: string): Promise<MedicalDocument | null> {
         if (!isInitialized) throw new Error('Adapter not initialized');
-        logInfo('Getting document', { silknoteDocumentUuid });
-        const sql = 'SELECT *, silknoteDocumentUuid as clientFileId FROM Document WHERE silknoteDocumentUuid = ?'; // Alias silknoteDocumentUuid
+        logInfo('Getting document', { clientFileId, silknotePatientUuid, silknoteUserUuid });
+        const sql = 'SELECT *, silknoteDocumentUuid as clientFileId FROM Document WHERE silknoteDocumentUuid = ? AND patientUuid = ?'; 
         try {
-            const rows = await executeQuery<RowDataPacket[]>(sql, [silknoteDocumentUuid]);
+            const rows = await executeQuery<RowDataPacket[]>(sql, [clientFileId, silknotePatientUuid]);
             return rows.length > 0 ? mapDocumentRow(rows[0]) : null;
         } catch (error) {
             return null;
         }
     },
 
-    async updateDocument(document: MedicalDocument): Promise<boolean> {
-        return this.saveDocument(document); // Uses INSERT ... ON DUPLICATE KEY UPDATE
+    async updateDocument(silknoteUserUuid: string, silknotePatientUuid: string, document: MedicalDocument): Promise<boolean> {
+        return this.saveDocument(silknoteUserUuid, silknotePatientUuid, document); // Uses INSERT ... ON DUPLICATE KEY UPDATE
     },
 
-    async deleteDocument(silknoteDocumentUuid: string): Promise<boolean> {
+    async deleteDocument(silknoteUserUuid: string, silknotePatientUuid: string, clientFileId: string): Promise<boolean> {
         if (!isInitialized) throw new Error('Adapter not initialized');
-        logInfo('Deleting document', { silknoteDocumentUuid });
-        const sql = 'DELETE FROM Document WHERE silknoteDocumentUuid = ?';
+        logInfo('Deleting document', { clientFileId, silknotePatientUuid, silknoteUserUuid });
+        const sql = 'DELETE FROM Document WHERE silknoteDocumentUuid = ? AND patientUuid = ?';
         try {
-            const result = await executeQuery<ResultSetHeader>(sql, [silknoteDocumentUuid]);
+            const result = await executeQuery<ResultSetHeader>(sql, [clientFileId, silknotePatientUuid]);
             return result.affectedRows > 0;
         } catch (error) {
             return false;
@@ -273,21 +270,18 @@ export function createMySqlDatabaseAdapter(): DatabaseAdapter {
     },
 
     // --- Patient Operations ---
-    // Assumes a `PATIENT` table exists with columns matching `mapPatientRow` expectations
-    async savePatient(patient: PatientDetails): Promise<boolean> {
+    async savePatient(silknoteUserUuid: string, patientDetails: PatientDetails): Promise<boolean> {
         if (!isInitialized) throw new Error('Adapter not initialized');
         // Use silknotePatientUuid exclusively
-        const patientUuid = patient.silknotePatientUuid || uuidv4(); // Generate if missing
-        // Use silknoteUserUuid for userUuid column
-        const userUuid = patient.silknoteUserUuid; 
-        logInfo('Saving patient', { patientUuid, userUuid });
+        const patientUuid = patientDetails.silknotePatientUuid || uuidv4(); // Generate if missing
+        logInfo('Saving patient', { patientUuid, silknoteUserUuid });
 
-        if (!userUuid) {
+        if (!silknoteUserUuid) {
             logError('Cannot save patient: silknoteUserUuid is missing');
             return false;
         }
         // Ensure patient object has the ID we are saving
-        patient.silknotePatientUuid = patientUuid;
+        patientDetails.silknotePatientUuid = patientUuid;
 
         const sql = `
             INSERT INTO PATIENT
@@ -298,14 +292,14 @@ export function createMySqlDatabaseAdapter(): DatabaseAdapter {
         `;
         const params = [
             patientUuid,
-            userUuid,
-            patient.name,
-            patient.dateOfBirth,
-            patient.gender,
+            silknoteUserUuid,
+            patientDetails.name,
+            patientDetails.dateOfBirth,
+            patientDetails.gender,
             // Stringify vectorStore and caseSummary before saving
-            patient.vectorStore ? JSON.stringify(patient.vectorStore) : null, 
-            patient.caseSummary ? JSON.stringify(patient.caseSummary) : null, 
-            patient.summaryGenerationCount || 0
+            patientDetails.vectorStore ? JSON.stringify(patientDetails.vectorStore) : null, 
+            patientDetails.caseSummary ? JSON.stringify(patientDetails.caseSummary) : null, 
+            patientDetails.summaryGenerationCount || 0
         ];
         try {
             await executeQuery<ResultSetHeader>(sql, params);
@@ -315,16 +309,16 @@ export function createMySqlDatabaseAdapter(): DatabaseAdapter {
         }
     },
 
-    async getPatient(silknotePatientUuid: string): Promise<PatientDetails | null> {
+    async getPatient(silknoteUserUuid: string, silknotePatientUuid: string): Promise<PatientDetails | null> {
         if (!isInitialized) throw new Error('Adapter not initialized');
-        logInfo('Getting patient', { silknotePatientUuid });
-        const patientSql = 'SELECT * FROM PATIENT WHERE silknotePatientUuid = ?'; // Removed alias
+        logInfo('Getting patient', { silknotePatientUuid, silknoteUserUuid });
+        const patientSql = 'SELECT * FROM PATIENT WHERE silknotePatientUuid = ? AND userUuid = ?'; 
         try {
-            const rows = await executeQuery<RowDataPacket[]>(patientSql, [silknotePatientUuid]);
+            const rows = await executeQuery<RowDataPacket[]>(patientSql, [silknotePatientUuid, silknoteUserUuid]);
             if (rows.length === 0) return null;
             
             const patientRecord = rows[0];
-            const documents = await this.getDocumentsForPatient(silknotePatientUuid);
+            const documents = await this.getDocumentsForPatient(silknoteUserUuid, silknotePatientUuid);
             
             return mapPatientRow(patientRecord, documents);
         } catch (error) {
@@ -332,14 +326,14 @@ export function createMySqlDatabaseAdapter(): DatabaseAdapter {
         }
     },
 
-     async getAllPatients(): Promise<PatientDetails[]> {
+     async getAllPatients(silknoteUserUuid: string): Promise<PatientDetails[]> {
         if (!isInitialized) throw new Error('Adapter not initialized');
-        logInfo('Getting all patients');
-        const sql = 'SELECT silknotePatientUuid FROM PATIENT';
+        logInfo('Getting all patients', { silknoteUserUuid });
+        const sql = 'SELECT silknotePatientUuid FROM PATIENT WHERE userUuid = ?';
         try {
-            const rows = await executeQuery<RowDataPacket[]>(sql, []);
+            const rows = await executeQuery<RowDataPacket[]>(sql, [silknoteUserUuid]);
             // Use bracket notation for row access
-            const patientPromises = rows.map(row => this.getPatient(row['silknotePatientUuid'])); 
+            const patientPromises = rows.map(row => this.getPatient(silknoteUserUuid, row['silknotePatientUuid'])); 
             const patients = await Promise.all(patientPromises);
             return patients.filter((p: PatientDetails | null): p is PatientDetails => p !== null);
         } catch (error) {
@@ -347,37 +341,37 @@ export function createMySqlDatabaseAdapter(): DatabaseAdapter {
         }
      },
 
-     async updatePatient(patientUpdate: Partial<PatientDetails>): Promise<boolean> {
+     async updatePatient(silknoteUserUuid: string, silknotePatientUuid: string, patientUpdates: Partial<PatientDetails>): Promise<boolean> {
         // Fetch the existing patient to merge, as savePatient performs INSERT/UPDATE
-        if (!patientUpdate.silknotePatientUuid) {
+        if (!silknotePatientUuid) {
              logError('Cannot update patient: silknotePatientUuid is missing');
              return false;
         }
-        const existingPatient = await this.getPatient(patientUpdate.silknotePatientUuid);
+        const existingPatient = await this.getPatient(silknoteUserUuid, silknotePatientUuid);
         if (!existingPatient) {
-            logError(`Cannot update patient: patient ${patientUpdate.silknotePatientUuid} not found`);
+            logError(`Cannot update patient: patient ${silknotePatientUuid} not found`);
             return false;
         }
         
         // Merge updates onto existing patient data
         const patientToSave: PatientDetails = {
             ...existingPatient,
-            ...patientUpdate,
+            ...patientUpdates,
             // Ensure fileSet remains an array if updated
-            fileSet: patientUpdate.fileSet ? patientUpdate.fileSet : existingPatient.fileSet || []
+            fileSet: patientUpdates.fileSet ? patientUpdates.fileSet : existingPatient.fileSet || []
         };
 
         // Now call savePatient which handles the upsert logic
-        return this.savePatient(patientToSave); 
+        return this.savePatient(silknoteUserUuid, patientToSave); 
      },
 
-     async deletePatient(silknotePatientUuid: string): Promise<boolean> {
+     async deletePatient(silknoteUserUuid: string, silknotePatientUuid: string): Promise<boolean> {
         if (!isInitialized) throw new Error('Adapter not initialized');
-        logInfo('Deleting patient', { silknotePatientUuid });
+        logInfo('Deleting patient', { silknotePatientUuid, silknoteUserUuid });
          // Assumes ON DELETE CASCADE is set for Document table in MySQL
-        const sql = 'DELETE FROM PATIENT WHERE silknotePatientUuid = ?';
+        const sql = 'DELETE FROM PATIENT WHERE silknotePatientUuid = ? AND userUuid = ?';
         try {
-            const result = await executeQuery<ResultSetHeader>(sql, [silknotePatientUuid]);
+            const result = await executeQuery<ResultSetHeader>(sql, [silknotePatientUuid, silknoteUserUuid]);
             return result.affectedRows > 0;
         } catch (error) {
             return false;
@@ -385,19 +379,16 @@ export function createMySqlDatabaseAdapter(): DatabaseAdapter {
      },
 
      // --- Relationship Operations ---
-     async addDocumentToPatient(silknotePatientUuid: string, document: MedicalDocument): Promise<boolean> {
+     async addDocumentToPatient(silknoteUserUuid: string, silknotePatientUuid: string, document: MedicalDocument): Promise<boolean> {
          if (!isInitialized) throw new Error('Adapter not initialized');
-        // Ensure patient exists (optional, FK constraint should handle)
-        // const patientExists = await this.getPatient(patientUuid); 
-        // if (!patientExists) return false;
-        
-        document.silknotePatientUuid = silknotePatientUuid; // Ensure the link is set via silknotePatientUuid field
-        return this.saveDocument(document);
+        // Ensure the link is set via silknotePatientUuid field
+        document.silknotePatientUuid = silknotePatientUuid; 
+        return this.saveDocument(silknoteUserUuid, silknotePatientUuid, document);
      },
 
-     async getDocumentsForPatient(silknotePatientUuid: string): Promise<MedicalDocument[]> {
+     async getDocumentsForPatient(silknoteUserUuid: string, silknotePatientUuid: string): Promise<MedicalDocument[]> {
         if (!isInitialized) throw new Error('Adapter not initialized');
-        logInfo('Getting documents for patient', { silknotePatientUuid });
+        logInfo('Getting documents for patient', { silknotePatientUuid, silknoteUserUuid });
         const sql = 'SELECT * FROM Document WHERE patientUuid = ? ORDER BY createdAt ASC';
         try {
             const rows = await executeQuery<RowDataPacket[]>(sql, [silknotePatientUuid]);
@@ -407,36 +398,116 @@ export function createMySqlDatabaseAdapter(): DatabaseAdapter {
         }
      },
       
-     // --- Optional VSRX/Queue Methods ---
-     // Referencing standalone functions defined above
-     getQueuedDocuments,
-     setDocumentStatus,
-     resetProcessingDocuments,
-     forceReprocessPatientDocuments,
-     forceReprocessDocument,
-
-     // --- Missing Methods Implementation (Stubbed) ---
-     async clearPatientCaseSummary(silknotePatientUuid: string): Promise<boolean> {
+     // --- Updated Queue Methods ---
+     async getQueuedDocuments(silknoteUserUuid: string, silknotePatientUuid: string, limit?: number): Promise<string[]> {
         if (!isInitialized) throw new Error('Adapter not initialized');
-        logInfo('clearPatientCaseSummary called, not implemented for MySQL yet', { silknotePatientUuid });
-        // TODO: Implement actual logic to clear case summary in MySQL
-        // For now, returning a success to match interface, assuming it could be a no-op or future feature
-        // Depending on requirements, this might involve setting a JSON field to null or deleting related records.
-        // Example: const sql = 'UPDATE PATIENT SET caseSummaryJson = NULL, summaryGenerationCount = 0 WHERE silknotePatientUuid = ?';
-        // await executeQuery<ResultSetHeader>(sql, [silknotePatientUuid]);
-        return Promise.resolve(false); // Or true if it's considered a success even if no-op
+        const actualLimit = limit || 10;
+        logInfo('Fetching queued document IDs', { limit: actualLimit, silknotePatientUuid, silknoteUserUuid });
+        const sql = "SELECT silknoteDocumentUuid FROM Document WHERE status = 'queued' AND patientUuid = ? ORDER BY createdAt ASC LIMIT ?";
+        try {
+          const rows = await executeQuery<RowDataPacket[]>(sql, [silknotePatientUuid, actualLimit]);
+          return rows.map((row: RowDataPacket) => String(row['silknoteDocumentUuid']));
+        } catch (error) {
+          return [];
+        }
      },
 
-     async acknowledgeDocumentAlert(silknotePatientUuid: string, silknoteDocumentUuid: string, alertType: DocumentAlertType): Promise<boolean> {
+     async setDocumentStatus(silknoteUserUuid: string, silknotePatientUuid: string, silknoteDocumentUuid: string, status: string): Promise<boolean> {
         if (!isInitialized) throw new Error('Adapter not initialized');
-        logInfo('acknowledgeDocumentAlert called, not implemented for MySQL yet', { silknotePatientUuid, silknoteDocumentUuid, alertType });
-        // TODO: Implement actual logic to acknowledge an alert in MySQL
-        // This would likely involve fetching the document's alertsJson, modifying it, and saving it back.
-        // 1. Fetch alertsJson from Document table for silknoteDocumentUuid
-        // 2. Parse JSON, find the alert by type, set its 'acknowledged' flag to true
-        // 3. Stringify the modified alerts back to JSON
-        // 4. Update the Document table with the new alertsJson
-        return Promise.resolve(false); // Or true, depending on desired behavior for non-implemented features
+        if (!silknoteDocumentUuid || !status) return false;
+        logInfo('Setting document status', { silknoteDocumentUuid, status, silknotePatientUuid, silknoteUserUuid });
+        const sql = 'UPDATE Document SET status = ?, updatedAt = NOW() WHERE silknoteDocumentUuid = ? AND patientUuid = ?';
+        try {
+            const result = await executeQuery<ResultSetHeader>(sql, [status, silknoteDocumentUuid, silknotePatientUuid]);
+            return result.affectedRows > 0;
+        } catch (error) {
+            return false;
+        }
+     },
+
+     async resetProcessingDocuments(): Promise<number> {
+           if (!isInitialized) throw new Error('Adapter not initialized');
+           logInfo('Resetting processing documents');
+           const sql = "UPDATE Document SET status = 'queued', updatedAt = NOW() WHERE status = 'processing'";
+           try {
+               const result = await executeQuery<ResultSetHeader>(sql, []);
+               logInfo(`Reset ${result.affectedRows} documents.`);
+               return result.affectedRows;
+           } catch (error) {
+               return 0;
+           }
+       },
+
+       async forceReprocessPatientDocuments(silknoteUserUuid: string, silknotePatientUuid: string): Promise<number> {
+          if (!isInitialized) throw new Error('Adapter not initialized');
+          if (!silknotePatientUuid) return 0;
+          logInfo('Forcing reprocess for patient documents', { silknotePatientUuid, silknoteUserUuid });
+          const sql = "UPDATE Document SET status = 'queued', updatedAt = NOW() WHERE patientUuid = ? AND status != 'queued'";
+          try {
+             const result = await executeQuery<ResultSetHeader>(sql, [silknotePatientUuid]);
+             logInfo(`Queued ${result.affectedRows} documents for reprocessing for patient ${silknotePatientUuid}.`);
+             return result.affectedRows;
+          } catch (error) {
+             return 0;
+          }
+       },
+
+       async forceReprocessDocument(silknoteUserUuid: string, silknotePatientUuid: string, silknoteDocumentUuid: string): Promise<boolean> {
+          if (!isInitialized) throw new Error('Adapter not initialized');
+          return setDocumentStatus(silknoteUserUuid, silknotePatientUuid, silknoteDocumentUuid, 'queued');
+       },
+
+     // --- Missing Methods Implementation ---
+     async clearPatientCaseSummary(silknoteUserUuid: string, silknotePatientUuid: string): Promise<boolean> {
+        if (!isInitialized) throw new Error('Adapter not initialized');
+        logInfo('Clearing patient case summary', { silknotePatientUuid, silknoteUserUuid });
+        const sql = 'UPDATE PATIENT SET caseSummaryJson = NULL, summaryGenerationCount = 0 WHERE silknotePatientUuid = ? AND userUuid = ?';
+        try {
+            const result = await executeQuery<ResultSetHeader>(sql, [silknotePatientUuid, silknoteUserUuid]);
+            return result.affectedRows > 0;
+        } catch (error) {
+            return false;
+        }
+     },
+
+     async acknowledgeDocumentAlert(silknoteUserUuid: string, silknotePatientUuid: string, silknoteDocumentUuid: string, alertType: DocumentAlertType): Promise<boolean> {
+        if (!isInitialized) throw new Error('Adapter not initialized');
+        logInfo('Acknowledging document alert', { silknotePatientUuid, silknoteDocumentUuid, alertType, silknoteUserUuid });
+        
+        // Fetch the document's current alerts
+        const getDocSql = 'SELECT alertsJson FROM Document WHERE silknoteDocumentUuid = ? AND patientUuid = ?';
+        try {
+            const rows = await executeQuery<RowDataPacket[]>(getDocSql, [silknoteDocumentUuid, silknotePatientUuid]);
+            if (rows.length === 0) return false;
+            
+            let alerts: any[] = [];
+            try {
+                if (rows[0]['alertsJson']) {
+                    alerts = JSON.parse(rows[0]['alertsJson']);
+                }
+            } catch (e) {
+                logError('Failed to parse alertsJson during acknowledge', e);
+                return false;
+            }
+            
+            // Find and acknowledge the alert
+            let alertFound = false;
+            alerts.forEach(alert => {
+                if (alert.type === alertType) {
+                    alert.acknowledged = true;
+                    alertFound = true;
+                }
+            });
+            
+            if (!alertFound) return false;
+            
+            // Update the document with modified alerts
+            const updateSql = 'UPDATE Document SET alertsJson = ?, updatedAt = NOW() WHERE silknoteDocumentUuid = ? AND patientUuid = ?';
+            const result = await executeQuery<ResultSetHeader>(updateSql, [JSON.stringify(alerts), silknoteDocumentUuid, silknotePatientUuid]);
+            return result.affectedRows > 0;
+        } catch (error) {
+            return false;
+        }
      }
   };
   return adapter;

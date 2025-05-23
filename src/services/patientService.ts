@@ -33,11 +33,12 @@ const logger = createLogger('PATIENT_SERVICE'); // Create logger instance
 
 // --- Refactored Functions using storageService.dbAdapter ---
 
-export async function getPatients(): Promise<PatientDetails[]> {
+export async function getPatients(silknoteUserUuid: string): Promise<PatientDetails[]> {
   console.log('[PATIENT SERVICE DB] Getting all patients');
   try {
     if (!storageService.isInitialized()) throw new Error('Storage service not initialized');
-    return await storageService.dbAdapter.getAllPatients();
+    if (!silknoteUserUuid) throw new Error('silknoteUserUuid is required');
+    return await storageService.dbAdapter.getAllPatients(silknoteUserUuid);
   } catch (error) {
     console.error('[PATIENT SERVICE DB] Error getting all patients:', error);
     return []; // Return empty array on error
@@ -45,7 +46,7 @@ export async function getPatients(): Promise<PatientDetails[]> {
 }
 
 /**
- * Get patients filtered by silknoteUserUuid - NOTE: This might need adjustment depending on DB schema
+ * Get patients filtered by silknoteUserUuid
  * @param silknoteUserUuid The user ID to filter by
  * @returns Array of patients belonging to the specified user
  */
@@ -56,23 +57,25 @@ export async function getPatientsByUserId(silknoteUserUuid: string): Promise<Pat
   }
   try {
     if (!storageService.isInitialized()) throw new Error('Storage service not initialized');
-    // Assuming dbAdapter.getAllPatients retrieves all and we filter here
-    // A more efficient approach would be a dbAdapter method like getPatientsByUserId(silknoteUserUuid)
-    const allPatients = await storageService.dbAdapter.getAllPatients();
-    return allPatients.filter((patient: PatientDetails) => patient.silknoteUserUuid === silknoteUserUuid);
+    return await storageService.dbAdapter.getAllPatients(silknoteUserUuid);
   } catch (error) {
     console.error(`[PATIENT SERVICE DB] Error getting patients for user ${silknoteUserUuid}:`, error);
     return [];
   }
 }
 
-export async function getPatientById(silknotePatientUuid: string): Promise<PatientDetails | null> {
+export async function getPatientById(silknotePatientUuid: string, silknoteUserUuid?: string): Promise<PatientDetails | null> {
   logger.info(`Getting patient by ID: ${silknotePatientUuid}`);
   try {
     if (!storageService.isInitialized()) {
       throw new Error('Storage service not initialized');
     }
-    const patient = await storageService.dbAdapter.getPatient(silknotePatientUuid);
+    
+    if (!silknoteUserUuid) {
+      throw new Error('silknoteUserUuid is required');
+    }
+    
+    const patient = await storageService.dbAdapter.getPatient(silknoteUserUuid, silknotePatientUuid);
 
     if (!patient) {
       logger.warn(`Patient not found: ${silknotePatientUuid}`);
@@ -83,7 +86,7 @@ export async function getPatientById(silknotePatientUuid: string): Promise<Patie
     if (patient.caseSummary === null && (patient.summaryGenerationCount || 0) > 0) {
       logger.warn(`Patient ${silknotePatientUuid} has count > 0 but stored case summary is null or invalid. Clearing it.`);
       try {
-        const cleared = await storageService.dbAdapter.clearPatientCaseSummary(silknotePatientUuid);
+        const cleared = await storageService.dbAdapter.clearPatientCaseSummary(silknoteUserUuid, silknotePatientUuid);
         if (cleared) {
           logger.info(`Successfully cleared invalid case summary for patient ${silknotePatientUuid}.`);
           // Reflect the cleared state in the returned object
@@ -114,13 +117,17 @@ export async function createPatient(patientInput: Partial<PatientDetails>): Prom
     console.log(`[PATIENT SERVICE DB] Generated new patient ID: ${patientInput.silknotePatientUuid}`);
   }
 
+  if (!patientInput.silknoteUserUuid) {
+    throw new Error('silknoteUserUuid is required for creating a patient');
+  }
+
   // Ensure essential fields have defaults if not provided
   const patientData: PatientDetails = {
     silknotePatientUuid: patientInput.silknotePatientUuid,
     name: patientInput.name || 'Unknown Patient',
     dateOfBirth: patientInput.dateOfBirth || new Date().toISOString().split('T')[0], // Default DOB if missing
     gender: patientInput.gender || 'unknown',
-    silknoteUserUuid: patientInput.silknoteUserUuid || 'default-user', // Assuming a default user or require it
+    silknoteUserUuid: patientInput.silknoteUserUuid,
     fileSet: patientInput.fileSet || [],
     vectorStore: patientInput.vectorStore ?? null,
     caseSummary: patientInput.caseSummary ?? null,
@@ -129,12 +136,12 @@ export async function createPatient(patientInput: Partial<PatientDetails>): Prom
 
   try {
     if (!storageService.isInitialized()) throw new Error('Storage service not initialized');
-    const success = await storageService.dbAdapter.savePatient(patientData);
+    const success = await storageService.dbAdapter.savePatient(patientData.silknoteUserUuid, patientData);
     if (!success) {
       throw new Error('Failed to save patient to database');
     }
     // Refetch the patient to get the full object including potential DB defaults/timestamps
-    const newPatient = await storageService.dbAdapter.getPatient(patientData.silknotePatientUuid);
+    const newPatient = await storageService.dbAdapter.getPatient(patientData.silknoteUserUuid, patientData.silknotePatientUuid);
     if (!newPatient) {
        throw new Error('Failed to retrieve newly created patient');
     }
@@ -151,24 +158,23 @@ export async function updatePatient(patientUpdate: Partial<PatientDetails>): Pro
   if (!silknotePatientUuid) {
     throw new Error('Patient ID (silknotePatientUuid) is required for update');
   }
+  
+  if (!patientUpdate.silknoteUserUuid) {
+    throw new Error('silknoteUserUuid is required for updating a patient');
+  }
+  
   console.log(`[PATIENT SERVICE DB] Updating patient ${silknotePatientUuid}`);
 
   try {
     if (!storageService.isInitialized()) throw new Error('Storage service not initialized');
-    // Fetch existing patient to merge update - dbAdapter.updatePatient should handle merging ideally
-    // const existingPatient = await storageService.dbAdapter.getPatient(silknotePatientUuid);
-    // if (!existingPatient) {
-    //   throw new Error(`Patient with ID ${silknotePatientUuid} not found for update`);
-    // }
-    // const mergedPatient = { ...existingPatient, ...patientUpdate };
-
+    
     // Directly call updatePatient assuming the adapter handles the update logic
-    const success = await storageService.dbAdapter.updatePatient(patientUpdate);
+    const success = await storageService.dbAdapter.updatePatient(patientUpdate.silknoteUserUuid, silknotePatientUuid, patientUpdate);
     if (!success) {
       throw new Error(`Failed to update patient ${silknotePatientUuid} in database`);
     }
      // Refetch the patient to get the updated full object
-    const updatedPatient = await storageService.dbAdapter.getPatient(silknotePatientUuid);
+    const updatedPatient = await storageService.dbAdapter.getPatient(patientUpdate.silknoteUserUuid, silknotePatientUuid);
      if (!updatedPatient) {
        throw new Error('Failed to retrieve updated patient');
      }
@@ -180,12 +186,14 @@ export async function updatePatient(patientUpdate: Partial<PatientDetails>): Pro
   }
 }
 
-export async function getFilesForPatient(silknotePatientUuid: string): Promise<MedicalDocument[]> {
+export async function getFilesForPatient(silknotePatientUuid: string, silknoteUserUuid: string): Promise<MedicalDocument[]> {
   const timestamp = new Date().toISOString();
   console.log(`[${timestamp}] [PATIENT SERVICE DB] Getting files for patient: ${silknotePatientUuid}`);
   try {
     if (!storageService.isInitialized()) throw new Error('Storage service not initialized');
-    const files = await storageService.dbAdapter.getDocumentsForPatient(silknotePatientUuid);
+    if (!silknoteUserUuid) throw new Error('silknoteUserUuid is required');
+    
+    const files = await storageService.dbAdapter.getDocumentsForPatient(silknoteUserUuid, silknotePatientUuid);
     console.log(`[${timestamp}] [PATIENT SERVICE DB] Found ${files.length} files for patient ${silknotePatientUuid}`);
     return files;
   } catch (error) {
@@ -199,9 +207,10 @@ export async function getFilesForPatient(silknotePatientUuid: string): Promise<M
  * Assumes the file itself is already stored elsewhere (e.g., local VSRX path).
  * @param silknotePatientUuid ID of the patient
  * @param medicalDocument Document metadata with storedPath set to the actual file location.
+ * @param silknoteUserUuid User UUID (required)
  * @returns The added medical document metadata.
  */
-export async function addFileToPatient(silknotePatientUuid: string, medicalDocument: MedicalDocument): Promise<MedicalDocument> {
+export async function addFileToPatient(silknotePatientUuid: string, medicalDocument: MedicalDocument, silknoteUserUuid: string): Promise<MedicalDocument> {
   const timestamp = new Date().toISOString();
   console.log(`[${timestamp}] [PATIENT SERVICE DB] Adding file reference to patient:`, {
     silknotePatientUuid,
@@ -215,10 +224,14 @@ export async function addFileToPatient(silknotePatientUuid: string, medicalDocum
     throw new Error('Missing required parameters: silknotePatientUuid, silknoteDocumentUuid, clientFileId, and storedPath are required.');
   }
 
+  if (!silknoteUserUuid) {
+    throw new Error('silknoteUserUuid is required');
+  }
+
   try {
     if (!storageService.isInitialized()) throw new Error('Storage service not initialized');
-
-    const patientExists = await storageService.dbAdapter.getPatient(silknotePatientUuid);
+    
+    const patientExists = await storageService.dbAdapter.getPatient(silknoteUserUuid, silknotePatientUuid);
     if (!patientExists) {
         console.warn(`[PATIENT SERVICE DB] Patient ${silknotePatientUuid} not found. Document will not be added without a valid patient.`);
         throw new Error(`Patient ${silknotePatientUuid} not found.`);
@@ -226,7 +239,7 @@ export async function addFileToPatient(silknotePatientUuid: string, medicalDocum
 
     medicalDocument.status = medicalDocument.status || 'stored';
 
-    const success = await storageService.dbAdapter.addDocumentToPatient(silknotePatientUuid, medicalDocument);
+    const success = await storageService.dbAdapter.addDocumentToPatient(silknoteUserUuid, silknotePatientUuid, medicalDocument);
     if (!success) {
       throw new Error(`Failed to add document ${medicalDocument.clientFileId} (UUID: ${medicalDocument.silknoteDocumentUuid}) reference to patient ${silknotePatientUuid}`);
     }
@@ -237,9 +250,9 @@ export async function addFileToPatient(silknotePatientUuid: string, medicalDocum
       silknoteDocumentUuid: medicalDocument.silknoteDocumentUuid
     });
 
-    const addedDoc = await storageService.dbAdapter.getDocument(medicalDocument.silknoteDocumentUuid!);
+    const addedDoc = await storageService.dbAdapter.getDocument(silknoteUserUuid, silknotePatientUuid, medicalDocument.clientFileId!);
     if (!addedDoc) {
-       console.warn(`[PATIENT SERVICE DB] Could not refetch added document using silknoteDocumentUuid: ${medicalDocument.silknoteDocumentUuid} (clientFileId: ${medicalDocument.clientFileId})`);
+       console.warn(`[PATIENT SERVICE DB] Could not refetch added document using clientFileId: ${medicalDocument.clientFileId} (silknoteDocumentUuid: ${medicalDocument.silknoteDocumentUuid})`);
        return medicalDocument;
     }
 
@@ -259,17 +272,22 @@ export async function addFileToPatient(silknotePatientUuid: string, medicalDocum
   }
 }
 
-export async function deleteFileFromPatient(silknotePatientUuid: string, clientFileId: string): Promise<void> {
+export async function deleteFileFromPatient(silknotePatientUuid: string, clientFileId: string, silknoteUserUuid: string): Promise<void> {
   console.log(`[PATIENT SERVICE DB] Deleting file reference ${clientFileId} for patient ${silknotePatientUuid}`);
   if (!silknotePatientUuid || !clientFileId) {
     throw new Error('Missing required parameters: silknotePatientUuid and clientFileId are required.');
   }
+  
+  if (!silknoteUserUuid) {
+    throw new Error('silknoteUserUuid is required');
+  }
+  
   try {
     if (!storageService.isInitialized()) throw new Error('Storage service not initialized');
 
     // Attempt to remove from vector store first
     try {
-      const vsDeletionSuccess = await removeFileFromVectorStore(silknotePatientUuid, clientFileId);
+      const vsDeletionSuccess = await removeFileFromVectorStore(silknotePatientUuid, clientFileId, silknoteUserUuid);
       if (vsDeletionSuccess) {
         console.log(`[PATIENT SERVICE] Successfully removed ${clientFileId} from vector store for patient ${silknotePatientUuid}.`);
       } else {
@@ -282,7 +300,7 @@ export async function deleteFileFromPatient(silknotePatientUuid: string, clientF
     }
 
     // Then delete from the main database (removes fileSet entry)
-    const dbDeletionSuccess = await storageService.dbAdapter.deleteDocument(clientFileId); 
+    const dbDeletionSuccess = await storageService.dbAdapter.deleteDocument(silknoteUserUuid, silknotePatientUuid, clientFileId); 
     if (!dbDeletionSuccess) {
       console.warn(`[PATIENT SERVICE DB] Failed to delete document ${clientFileId} from database or it didn't exist.`);
     } else {
@@ -315,15 +333,21 @@ export async function deleteFileFromPatient(silknotePatientUuid: string, clientF
 //   return patient ? patient.fileSet : [];
 // }
 
-export async function deletePatient(silknotePatientUuid: string): Promise<void> {
+export async function deletePatient(silknotePatientUuid: string, silknoteUserUuid: string): Promise<void> {
    console.log(`[PATIENT SERVICE DB] Deleting patient ${silknotePatientUuid}`);
   if (!silknotePatientUuid) {
     throw new Error('Missing required parameter: silknotePatientUuid is required.');
   }
+  
+  if (!silknoteUserUuid) {
+    throw new Error('silknoteUserUuid is required');
+  }
+  
   try {
     if (!storageService.isInitialized()) throw new Error('Storage service not initialized');
+    
     // The dbAdapter.deletePatient should handle deleting associated documents if cascaded in DB
-    const success = await storageService.dbAdapter.deletePatient(silknotePatientUuid);
+    const success = await storageService.dbAdapter.deletePatient(silknoteUserUuid, silknotePatientUuid);
     if (!success) {
       console.warn(`[PATIENT SERVICE DB] Failed to delete patient ${silknotePatientUuid} from database or patient not found.`);
     } else {
@@ -344,18 +368,25 @@ export async function deletePatient(silknotePatientUuid: string): Promise<void> 
  */
 export async function updateFileForPatient(
   silknotePatientUuid: string, // Keep silknotePatientUuid for context/logging, even if clientFileId is unique
-  updatedFile: MedicalDocument
+  updatedFile: MedicalDocument,
+  silknoteUserUuid: string
 ): Promise<void> {
    console.log(`[PATIENT SERVICE DB] Updating file ${updatedFile.clientFileId} for patient ${silknotePatientUuid}`);
    if (!silknotePatientUuid || !updatedFile || !updatedFile.clientFileId) {
      throw new Error('Missing required parameters: silknotePatientUuid and updatedFile with clientFileId are required.');
    }
+   
+   if (!silknoteUserUuid) {
+     throw new Error('silknoteUserUuid is required');
+   }
+   
    // Ensure silknotePatientUuid is set on the updated file object
    updatedFile.silknotePatientUuid = silknotePatientUuid;
    try {
      if (!storageService.isInitialized()) throw new Error('Storage service not initialized');
+     
      // Use the dbAdapter's updateDocument method
-     const success = await storageService.dbAdapter.updateDocument(updatedFile);
+     const success = await storageService.dbAdapter.updateDocument(silknoteUserUuid, silknotePatientUuid, updatedFile);
      if (!success) {
        throw new Error(`Failed to update document ${updatedFile.clientFileId} in database.`);
      }
@@ -381,6 +412,7 @@ export async function streamSearchQuery(
   silknotePatientUuid: string,
   query: string,
   res: Response,
+  silknoteUserUuid: string,
   options: {
     includeExactQuotes?: boolean;
     outputFormat?: string;
@@ -392,7 +424,7 @@ export async function streamSearchQuery(
   }
 
   // Get patient data using the refactored getPatientById
-  const patient = await getPatientById(silknotePatientUuid);
+  const patient = await getPatientById(silknotePatientUuid, silknoteUserUuid);
   if (!patient?.vectorStore?.assistantId) {
     // Use a more specific error message
     const errorMsg = !patient
@@ -599,6 +631,7 @@ export async function streamSearchQuery(
 export async function getQueryResponse(
   silknotePatientUuid: string,
   query: string,
+  silknoteUserUuid: string,
   options: {
     includeExactQuotes?: boolean;
     outputFormat?: string;
@@ -612,7 +645,7 @@ export async function getQueryResponse(
   }
 
   // Ensure patient and vector store exist before calling the vectorStore function
-  const patient = await getPatientById(silknotePatientUuid);
+  const patient = await getPatientById(silknotePatientUuid, silknoteUserUuid);
   if (!patient?.vectorStore?.assistantId) {
     const errorMsg = !patient
       ? `Patient with ID ${silknotePatientUuid} not found.`
@@ -626,7 +659,8 @@ export async function getQueryResponse(
     const result = await vectorStore.queryAssistantWithCitations(
       silknotePatientUuid,
       query,
-      options.outputFormat || 'text' // Pass output format hint
+      options.outputFormat || 'text', // Pass output format hint
+      silknoteUserUuid // Pass the required parameter
     );
     
     console.log(`[PATIENT SERVICE - getQueryResponse] Received result from vectorStore: Content length ${result.content.length}, Citations count ${result.citations.length}`);
