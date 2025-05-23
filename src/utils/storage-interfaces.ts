@@ -26,36 +26,42 @@ export interface FileStorageAdapter {
 
 /**
  * Database Adapter Interface
- * Defines operations needed for database storage
+ * Defines operations needed for database storage.
+ * All methods that access or modify patient-specific data or user-specific data
+ * must include silknoteUserUuid and silknotePatientUuid for scoped access.
+ * Document-specific operations also require a document identifier (clientFileId or silknoteDocumentUuid).
  */
 export interface DatabaseAdapter {
   initialize(): Promise<{ success: boolean; errors: StorageError[] }>;
-  
-  // Document operations
-  saveDocument(document: MedicalDocument): Promise<boolean>;
-  getDocument(documentId: string): Promise<MedicalDocument | null>;
-  updateDocument(document: MedicalDocument): Promise<boolean>;
-  deleteDocument(documentId: string): Promise<boolean>;
-  
-  // Patient operations - Use PatientDetails consistently
-  savePatient(patient: PatientDetails): Promise<boolean>;
-  getPatient(silknotePatientUuid: string): Promise<PatientDetails | null>;
-  getAllPatients(): Promise<PatientDetails[]>;
-  updatePatient(patient: Partial<PatientDetails>): Promise<boolean>;
-  deletePatient(silknotePatientUuid: string): Promise<boolean>;
-  clearPatientCaseSummary(silknotePatientUuid: string): Promise<boolean>;
-  
-  // Relationship operations
-  addDocumentToPatient(silknotePatientUuid: string, document: MedicalDocument): Promise<boolean>;
-  getDocumentsForPatient(silknotePatientUuid: string): Promise<MedicalDocument[]>;
-  
-  // Alert Method
-  acknowledgeDocumentAlert(silknotePatientUuid: string, silknoteDocumentUuid: string, alertType: DocumentAlertType): Promise<boolean>;
 
-  // Queue/VSRX methods (if applicable)
-  getQueuedDocuments?(limit?: number): Promise<string[]>;
-  setDocumentStatus?(silknoteDocumentUuid: string, status: string): Promise<boolean>;
-  resetProcessingDocuments?(): Promise<number>;
-  forceReprocessPatientDocuments?(silknotePatientUuid: string): Promise<number>;
-  forceReprocessDocument?(silknoteDocumentUuid: string): Promise<boolean>;
-} 
+  // Document operations scoped by user and patient
+  // 'documentId' here typically refers to clientFileId for fetch/delete, 
+  // or is part of the MedicalDocument object for save/update.
+  saveDocument(silknoteUserUuid: string, silknotePatientUuid: string, document: MedicalDocument): Promise<boolean>;
+  getDocument(silknoteUserUuid: string, silknotePatientUuid: string, clientFileId: string): Promise<MedicalDocument | null>;
+  updateDocument(silknoteUserUuid: string, silknotePatientUuid: string, document: MedicalDocument): Promise<boolean>;
+  deleteDocument(silknoteUserUuid: string, silknotePatientUuid: string, clientFileId: string): Promise<boolean>;
+  getDocumentsForPatient(silknoteUserUuid: string, silknotePatientUuid: string): Promise<MedicalDocument[]>;
+  addDocumentToPatient(silknoteUserUuid: string, silknotePatientUuid: string, document: MedicalDocument): Promise<boolean>;
+
+  // Patient operations scoped by user (owner/accessor)
+  // 'patientDetails' includes the silknotePatientUuid for save/update.
+  savePatient(silknoteUserUuid: string, patientDetails: PatientDetails): Promise<boolean>; // userUuid is the owner
+  getPatient(silknoteUserUuid: string, silknotePatientUuid: string): Promise<PatientDetails | null>;
+  getAllPatients(silknoteUserUuid: string): Promise<PatientDetails[]>; // Get all patients for a specific user
+  updatePatient(silknoteUserUuid: string, silknotePatientUuid: string, patientUpdates: Partial<PatientDetails>): Promise<boolean>;
+  deletePatient(silknoteUserUuid: string, silknotePatientUuid: string): Promise<boolean>;
+  clearPatientCaseSummary(silknoteUserUuid: string, silknotePatientUuid: string): Promise<boolean>;
+
+  // Alert Method - scoped by user, patient, and specific document (using its DB UUID)
+  acknowledgeDocumentAlert(silknoteUserUuid: string, silknotePatientUuid: string, silknoteDocumentUuid: string, alertType: DocumentAlertType): Promise<boolean>;
+
+  // Queue/VSRX methods - scoping to be determined by their exact function.
+  // If they list or modify documents, they need scoping.
+  // If truly global admin functions, they might not. For now, let's assume scoping if data is not global.
+  getQueuedDocuments?(silknoteUserUuid: string, silknotePatientUuid: string, limit?: number): Promise<string[]>; // Example: get queued docs for a specific patient
+  setDocumentStatus?(silknoteUserUuid: string, silknotePatientUuid: string, silknoteDocumentUuid: string, status: string): Promise<boolean>;
+  resetProcessingDocuments?(): Promise<number>; // Potentially global admin task, may not need scoping here unless resetting for a specific user/patient.
+  forceReprocessPatientDocuments?(silknoteUserUuid: string, silknotePatientUuid: string): Promise<number>;
+  forceReprocessDocument?(silknoteUserUuid: string, silknotePatientUuid: string, silknoteDocumentUuid: string): Promise<boolean>;
+}

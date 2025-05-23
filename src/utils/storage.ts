@@ -388,9 +388,23 @@ export class StorageService {
     if (!this.initialized) throw new Error('Storage service not initialized');
     return this.dbAdapter.saveDocument(document);
   }
-  async getDocument(documentId: string): Promise<MedicalDocument | null> {
+  async getDocument(documentId: string, silknotePatientUuid?: string): Promise<MedicalDocument | null> {
     if (!this.initialized) throw new Error('Storage service not initialized');
-    return this.dbAdapter.getDocument(documentId);
+    
+    let contextMessage = `documentId: ${documentId}`;
+    if (silknotePatientUuid) {
+      contextMessage += `, silknotePatientUuid: ${silknotePatientUuid}`;
+    }
+
+    if (this.operatingMode === 'SILKNOTE') {
+      logInfo(`SILKNOTE Mode: storageService.getDocument called with ${contextMessage}`);
+      // The Prisma adapter's getDocument implementation MUST now use both 
+      // documentId (as clientFileId/storedPath) AND silknotePatientUuid for the lookup.
+    } else {
+      logInfo(`storageService.getDocument called with ${contextMessage}`);
+    }
+    // Pass both arguments to the adapter. The adapter will decide how to use them.
+    return this.dbAdapter.getDocument(documentId, silknotePatientUuid);
   }
   async updateDocument(document: MedicalDocument): Promise<boolean> {
     if (!this.initialized) throw new Error('Storage service not initialized');

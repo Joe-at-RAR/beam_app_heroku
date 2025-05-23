@@ -1,597 +1,1010 @@
-import { PrismaClient, Prisma } from '@prisma/client';
+import { PrismaClient, Prisma, SilknoteDocument } from '@prisma/client';
 import { DatabaseAdapter, StorageError } from '../storage-interfaces';
 import { MedicalDocument, PatientDetails, DocumentType, DocumentAlert, DocumentAlertType, CaseSummaryApiResponse } from '../../shared/types';
-import { parseCaseSummary } from '../../shared/case-summary-types';
-import { v4 as uuidv4 } from 'uuid'; // Needed for generating UUIDs if not provided by DB
+import { createLogger } from '../logger';
+import path from 'path';
+import { v4 as uuidv4 } from 'uuid';
 
-// --- Logging Helpers ---
-function logInfo(message: string, data?: any): void {
-  console.log(`[PRISMA DB ADAPTER] INFO ${new Date().toISOString()} - ${message}`, data ?? '');
-}
-function logError(message: string, error?: Error | any, context?: any): void {
-  const errorDetails = error instanceof Error ? { message: error.message, stack: error.stack } : error;
-  console.error(`[PRISMA DB ADAPTER] ERROR ${new Date().toISOString()} - ${message}`, { error: errorDetails, context: context ?? {} });
-}
-function logWarn(message: string, data?: any): void {
-  console.warn(`[PRISMA DB ADAPTER] WARN ${new Date().toISOString()} - ${message}`, data ?? '');
-}
+const logger = createLogger('PRISMA_DB_ADAPTER');
+const prisma = new PrismaClient();
 
-// --- Prisma Client Initialization ---
-let prisma: PrismaClient | null = null;
+const defaultMedicalDocumentContent = (): MedicalDocument['content'] => ({
+    analysisResult: null,
+    extractedSchemas: [],
+    enrichedSchemas: [],
+    pageImages: [],
+    // data: undefined, // if part of the type and optional
+});
 
-function getPrismaClient(): PrismaClient {
-    if (!prisma) {
-        logInfo('Initializing new Prisma Client instance');
-        prisma = new PrismaClient();
+// Type for a document when its patientFileset (with user info) is also fetched.
+const documentWithPatientContextArgs = {
+    include: { patientFileset: { select: { silknoteUserUuid: true, patientName: true, patientDob: true } } }
+} satisfies Prisma.SilknoteDocumentArgs;
+type PrismaDocWithPatientContext = Prisma.SilknoteDocumentGetPayload<typeof documentWithPatientContextArgs>;
+
+// Type for a patient with all their (scalar) documents.
+const patientWithFullDocumentsArgs = {
+    include: { documents: true } // true here includes all scalar fields of SilknoteDocument
+} satisfies Prisma.SilknotePatientFilesetArgs;
+type PrismaPatientWithFullDocs = Prisma.SilknotePatientFilesetGetPayload<typeof patientWithFullDocumentsArgs>;
+
+function mapPrismaDocumentToMedicalDocument(
+    // This function can be called with a document that has its patientFileset context, or just a plain document.
+    prismaDoc: (SilknoteDocument & { patientFileset?: { silknoteUserUuid: string, patientName: string | null, patientDob: string | null } }) | null
+): MedicalDocument | null {
+    if (!prismaDoc) {
+        return null;
     }
-    return prisma;
-}
 
-// --- Type Mapping Helper (Prisma SilknoteDocument -> MedicalDocument) ---
-function mapPrismaDocToMedicalDoc(prismaDoc: Prisma.SilknoteDocumentGetPayload<{}>): MedicalDocument {
-     // Safely parse JSON content, providing defaults
-     let content = { analysisResult: null, extractedSchemas: [], enrichedSchemas: [], pageImages: [] };
-     try {
-         if (prismaDoc.contentJson) content = { ...content, ...JSON.parse(prismaDoc.contentJson) };
-     } catch (e) { logError('Failed to parse contentJson', e, { contentJson: prismaDoc.contentJson?.substring(0,100) }); }
-     
-     let alerts: DocumentAlert[] = [];
-     try {
-         if (prismaDoc.alertsJson) alerts = JSON.parse(prismaDoc.alertsJson);
-         if (!Array.isArray(alerts)) alerts = []; // Ensure it's an array post-parse
-     } catch (e) { logError('Failed to parse alertsJson', e, { alertsJson: prismaDoc.alertsJson?.substring(0,100) }); alerts = []; }
+    let content: MedicalDocument['content'] = defaultMedicalDocumentContent(); 
+    try {
+        if (prismaDoc.contentJson) {
+            const parsedContent = JSON.parse(prismaDoc.contentJson);
+            if (typeof parsedContent === 'object' && parsedContent !== null) {
+                // Assuming parsedContent might not fully match defaultMedicalDocumentContent structure initially
+                content = { 
+                    analysisResult: parsedContent.analysisResult !== undefined ? parsedContent.analysisResult : null,
+                    extractedSchemas: Array.isArray(parsedContent.extractedSchemas) ? parsedContent.extractedSchemas : [],
+                    enrichedSchemas: Array.isArray(parsedContent.enrichedSchemas) ? parsedContent.enrichedSchemas : [],
+                    pageImages: Array.isArray(parsedContent.pageImages) ? parsedContent.pageImages : [],
+                    data: parsedContent.data, // if 'data' (ArrayBuffer) can be in JSON
+                } as MedicalDocument['content'];
+                 if (parsedContent.error) (content as any).error = parsedContent.error;
+                 if (parsedContent.details) (content as any).details = parsedContent.details;
+            } else {
+                (content as any).error = "Parsed contentJson was not an object.";
+            }
+        }
+    } catch (e) {
+        logger.error(`[PRISMA MAPPER] Error parsing contentJson for doc ${prismaDoc.silknoteDocumentUuid}:`, e);
+        (content as any).error = "Failed to parse content";
+        (content as any).details = (e as Error).message;
+    }
 
-     const medicalDoc: MedicalDocument = {
+    let alerts: DocumentAlert[] = [];
+    try {
+        if (prismaDoc.alertsJson) {
+            alerts = JSON.parse(prismaDoc.alertsJson);
+            if (!Array.isArray(alerts)) alerts = [];
+        }
+    } catch (e) {
+        logger.error(`[PRISMA MAPPER] Error parsing alertsJson for doc ${prismaDoc.silknoteDocumentUuid}:`, e);
+    }
+    
+    let detectedPatientInfo: { name?: string; dateOfBirth?: string } | undefined = undefined;
+    let isIncorrectPatient = false;
+
+    const patientFilesetFromDoc = prismaDoc.patientFileset;
+    const detectedNameFromDb = (prismaDoc as any).detectedPatientName; 
+    const detectedDobFromDb = (prismaDoc as any).detectedPatientDob;  
+
+    if (detectedNameFromDb || detectedDobFromDb) {
+        detectedPatientInfo = {
+            name: detectedNameFromDb ?? undefined,
+            dateOfBirth: detectedDobFromDb ?? undefined,
+        };
+        if (patientFilesetFromDoc && detectedPatientInfo && patientFilesetFromDoc.patientName && patientFilesetFromDoc.patientDob) {
+            isIncorrectPatient = 
+                (!!detectedPatientInfo.name && detectedPatientInfo.name.toLowerCase() !== patientFilesetFromDoc.patientName.toLowerCase()) ||
+                (!!detectedPatientInfo.dateOfBirth && detectedPatientInfo.dateOfBirth !== patientFilesetFromDoc.patientDob);
+        }
+    }
+    
+    const toISOStringOptional = (date: Date | string | null | undefined): string | undefined => {
+        if (!date) return undefined;
+        if (date instanceof Date) return date.toISOString();
+        if (typeof date === 'string') {
+            try {
+                // Validate if it's a parseable date string before calling toISOString
+                return new Date(date).toISOString();
+            } catch {
+                // If parsing fails, and it was a string, return it as is or handle as error
+                // For now, returning undefined for safety if it's not a valid date string for new Date()
+                return undefined; 
+            }
+        }
+        return undefined;
+    };
+
+    const medicalDoc: MedicalDocument = {
         silknoteDocumentUuid: prismaDoc.silknoteDocumentUuid,
-        clientFileId: prismaDoc.silknoteDocumentUuid,
+        clientFileId: prismaDoc.clientFileId || '', // Provide default empty string if null
         silknotePatientUuid: prismaDoc.patientUuid,
         originalName: prismaDoc.originalName,
         storedPath: prismaDoc.storedPath || '',
         status: prismaDoc.status,
-        category: prismaDoc.category as DocumentType || DocumentType.UNKNOWN,
-        uploadDate: prismaDoc.uploadDate.toISOString(),
-        type: prismaDoc.mimeType || 'application/octet-stream',
-        size: prismaDoc.sizeBytes || 0,
-        title: prismaDoc.title || prismaDoc.originalName,
-        format: {
-          mimeType: prismaDoc.mimeType || '',
-          extension: prismaDoc.originalName.includes('.') ? prismaDoc.originalName.split('.').pop() || '' : '',
+        category: prismaDoc.category as DocumentType,
+        type: prismaDoc.mimeType, 
+        size: prismaDoc.sizeBytes ?? 0,
+        title: prismaDoc.title ?? prismaDoc.originalName,
+        format: { 
+            mimeType: prismaDoc.mimeType, 
+            extension: path.extname(prismaDoc.originalName).replace(/^\./, '') || 'pdf'
         },
-        fileSize: prismaDoc.sizeBytes || 0,
-        pageCount: prismaDoc.pageCount || 0, // Default pageCount to 0 if null
-        documentDate: prismaDoc.documentDate || '', // Default documentDate to empty string if null
-        processedAt: prismaDoc.processedAt?.toISOString() || undefined,
-        author: prismaDoc.author || undefined,
-        sourceSystem: prismaDoc.sourceSystem || undefined,
-        filename: prismaDoc.originalName,
-        confidence: 0,
-        isIncorrectPatient: false,
-        content: content,
+        fileSize: prismaDoc.sizeBytes ?? 0,
+        pageCount: prismaDoc.pageCount ?? 0,
+        documentDate: toISOStringOptional(prismaDoc.documentDate),
+        uploadDate: toISOStringOptional(prismaDoc.uploadDate)!, 
+        processedAt: toISOStringOptional(prismaDoc.processedAt),
+        author: prismaDoc.author ?? '',
+        sourceSystem: prismaDoc.sourceSystem ?? 'upload',
+        filename: prismaDoc.originalName, 
+        confidence: (prismaDoc as any).confidence ?? 0,
+        content: content, 
         alerts: alerts,
-        detectedPatientInfo: undefined
-     };
-     return medicalDoc;
+        isIncorrectPatient: isIncorrectPatient,
+        detectedPatientInfo: detectedPatientInfo,
+    };
+    return medicalDoc;
 }
 
-// --- Adapter Implementation ---
+function mapPrismaPatientToPatientDetails(
+    prismaPatientFileset: PrismaPatientWithFullDocs | null
+): PatientDetails | null {
+    if (!prismaPatientFileset) {
+        return null;
+    }
+
+    const mappedDocs = prismaPatientFileset.documents?.map(doc => 
+        mapPrismaDocumentToMedicalDocument(doc as SilknoteDocument & { patientFileset?: any }) 
+    ).filter((d): d is MedicalDocument => d !== null) ?? [];
+
+    let vectorStore: any = null;
+    try {
+        if (prismaPatientFileset.vectorStoreJson) {
+            vectorStore = JSON.parse(prismaPatientFileset.vectorStoreJson);
+        }
+    } catch (e) {
+        logger.error(`[PRISMA MAPPER] Error parsing vectorStoreJson for patient ${prismaPatientFileset.silknotePatientUuid}:`, e);
+    }
+
+    let caseSummary: CaseSummaryApiResponse | null = null;
+    try {
+        if (prismaPatientFileset.caseSummaryJson) {
+            const parsed = JSON.parse(prismaPatientFileset.caseSummaryJson);
+            if (parsed && typeof parsed.summary === 'object' && Array.isArray(parsed.citations)) {
+                caseSummary = parsed as CaseSummaryApiResponse;
+            } else {
+                 logger.warn(`[PRISMA MAPPER] Parsed caseSummaryJson for patient ${prismaPatientFileset.silknotePatientUuid} lacks CaseSummaryApiResponse structure.`);
+            }
+        }
+    } catch (e) {
+        logger.error(`[PRISMA MAPPER] Error parsing caseSummaryJson for patient ${prismaPatientFileset.silknotePatientUuid}:`, e);
+    }
+
+    const patientDetails: PatientDetails = {
+        silknoteUserUuid: prismaPatientFileset.silknoteUserUuid,
+        silknotePatientUuid: prismaPatientFileset.silknotePatientUuid,
+        name: prismaPatientFileset.patientName ?? '',
+        dateOfBirth: prismaPatientFileset.patientDob ?? '',
+        gender: prismaPatientFileset.gender ?? 'unknown',
+        fileSet: mappedDocs,
+        vectorStore: vectorStore,
+        caseSummary: caseSummary, 
+        summaryGenerationCount: prismaPatientFileset.summaryGenerationCount ?? 0,
+    };
+    return patientDetails;
+}
+
 export function createPrismaAdapter(): DatabaseAdapter {
-    let isInitialized = false;
+    logger.info('Prisma DB Adapter created.');
 
-    return {
+    // Helper to convert MedicalDocument date strings (ISO) to what Prisma data input expects (ISO string or null)
+    const medicalDateToPrismaInput = (dateString: string | undefined | null): string | null => {
+        if (!dateString) return null;
+        // Assuming dateString is already a valid ISO string or can be parsed by new Date()
+        // Prisma typically accepts valid ISO strings directly for DateTime fields.
+        try {
+            new Date(dateString).toISOString(); // Validate it's a parseable date string
+            return dateString;
+        } catch (e) {
+            logger.warn(`[PRISMA_ADAPTER] Invalid date string for Prisma input: ${dateString}`);
+            return null;
+        }
+    };
+
+    // Remove the duplicate adapterMethods variable declaration
+    const methods = {
         async initialize(): Promise<{ success: boolean; errors: StorageError[] }> {
-            if (isInitialized) {
-                logInfo('Prisma Adapter already initialized.');
-                return { success: true, errors: [] };
-            }
-            logInfo('Initializing Prisma Adapter...');
             try {
-                const client = getPrismaClient();
-                await client.$connect();
-                logInfo('Prisma client connected successfully.');
-                isInitialized = true;
+                await prisma.$connect();
+                logger.info('Prisma client connected successfully.');
                 return { success: true, errors: [] };
             } catch (error: any) {
-                logError('Prisma Adapter initialization failed', error);
-                await prisma?.$disconnect();
-                prisma = null;
-                isInitialized = false;
-                return { success: false, errors: [{ code: 'PRISMA_INIT_ERROR', message: error.message || 'Unknown Prisma Init Error' }] };
+                logger.error('Prisma client connection failed:', error);
+                return { success: false, errors: [{ code: 'DB_CONN_ERROR', message: error.message }] };
             }
         },
 
-        // --- Document Operations (Using Prisma `silknoteDocument` model) ---
-        async saveDocument(document: MedicalDocument): Promise<boolean> {
-            if (!isInitialized) throw new Error('Prisma Adapter not initialized');
-            const client = getPrismaClient();
-            const silknoteDocumentUuid = document.silknoteDocumentUuid || uuidv4();
-            const patientUuid = document.silknotePatientUuid;
-            
-            if (!patientUuid) {
-                logError('Cannot save document: missing silknotePatientUuid');
-                return false;
-            }
-            logInfo('Saving document (upsert)', { silknoteDocumentUuid, patientUuid });
-
-            // Prepare data for Prisma `silknoteDocument` model
-            const prismaDocData = {
-                patientUuid: patientUuid,
-                originalName: document.originalName,
-                storedPath: document.storedPath,
-                status: document.status,
-                category: document.category,
-                mimeType: document.type,
-                sizeBytes: document.size,
-                pageCount: document.pageCount,
-                documentDate: document.documentDate,
-                uploadDate: new Date(document.uploadDate),
-                processedAt: document.processedAt ? new Date(document.processedAt) : null,
-                title: document.title,
-                author: document.author,
-                sourceSystem: document.sourceSystem,
-                contentJson: document.content ? JSON.stringify(document.content) : null,
-                alertsJson: document.alerts && Array.isArray(document.alerts) ? JSON.stringify(document.alerts) : null,
-            };
-
+        async saveDocument(silknoteUserUuid: string, silknotePatientUuid: string, document: MedicalDocument): Promise<boolean> {
+            logger.info(`[PRISMA] saveDocument for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}, clientFileId: ${document.clientFileId}`);
             try {
-                // Use `client.silknoteDocument`
-                await client.silknoteDocument.upsert({
-                    where: { silknoteDocumentUuid: silknoteDocumentUuid },
-                    update: prismaDocData,
-                    create: {
-                        silknoteDocumentUuid: silknoteDocumentUuid,
-                        ...prismaDocData,
-                    },
+                const patientFileSet = await prisma.silknotePatientFileset.findUnique({
+                    where: { silknotePatientUuid, silknoteUserUuid },
                 });
-                return true;
-            } catch (error) {
-                logError(`Failed to save document ${silknoteDocumentUuid}`, error);
-                return false;
-            }
-        },
-
-        async getDocument(silknoteDocumentUuid: string): Promise<MedicalDocument | null> {
-            if (!isInitialized) throw new Error('Prisma Adapter not initialized');
-            const client = getPrismaClient();
-            logInfo('Getting document', { silknoteDocumentUuid });
-             try {
-                 // Use `client.silknoteDocument`
-                 const prismaDoc = await client.silknoteDocument.findUnique({
-                     where: { silknoteDocumentUuid: silknoteDocumentUuid },
-                 });
-                 return prismaDoc ? mapPrismaDocToMedicalDoc(prismaDoc) : null;
-             } catch (error) {
-                 logError(`Failed to get document ${silknoteDocumentUuid}`, error);
-                 return null;
-             }
-        },
-
-        async updateDocument(document: MedicalDocument): Promise<boolean> {
-            return this.saveDocument(document);
-        },
-
-        async deleteDocument(silknoteDocumentUuid: string): Promise<boolean> {
-             if (!isInitialized) throw new Error('Prisma Adapter not initialized');
-            const client = getPrismaClient();
-            logInfo('Deleting document', { silknoteDocumentUuid });
-            try {
-                // Use `client.silknoteDocument`
-                await client.silknoteDocument.delete({ 
-                    where: { silknoteDocumentUuid: silknoteDocumentUuid } 
-                });
-                return true;
-            } catch (error: any) {
-                 if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
-                     logInfo(`Document ${silknoteDocumentUuid} not found for deletion.`);
-                     return true;
-                 }
-                logError(`Failed to delete document ${silknoteDocumentUuid}`, error);
-                return false;
-            }
-        },
-
-        // --- Patient Operations (Using Prisma `silknotePatientFileset` model) ---
-        async savePatient(patient: PatientDetails): Promise<boolean> {
-            if (!isInitialized) throw new Error('Prisma Adapter not initialized');
-            const client = getPrismaClient();
-            const silknotePatientUuid = patient.silknotePatientUuid || uuidv4();
-            const silknoteUserUuid = patient.silknoteUserUuid;
-            
-            if (!silknoteUserUuid) {
-                logError('Cannot save patient: missing silknoteUserUuid');
-                return false;
-            }
-            logInfo('Saving patient fileset (upsert)', { silknotePatientUuid });
-
-            const vectorStoreJson = patient.vectorStore ? JSON.stringify(patient.vectorStore) : null;
-            const caseSummaryJson = patient.caseSummary ? JSON.stringify(patient.caseSummary) : null;
-
-            // Prepare data for Prisma `silknotePatientFileset` model
-            const patientDbData = {
-                silknoteUserUuid: silknoteUserUuid,
-                patientName: patient.name,
-                patientDob: patient.dateOfBirth,
-                gender: patient.gender,
-                vectorStoreJson: vectorStoreJson,
-                caseSummaryJson: caseSummaryJson,
-                summaryGenerationCount: patient.summaryGenerationCount || 0,
-            };
-
-            try {
-                // Use `client.silknotePatientFileset`
-                await client.silknotePatientFileset.upsert({
-                    where: { silknotePatientUuid: silknotePatientUuid },
-                    update: patientDbData,
-                    create: {
-                         silknotePatientUuid: silknotePatientUuid,
-                         ...patientDbData,
-                    },
-                });
-                return true;
-            } catch (error) {
-                logError(`Failed to save patient fileset ${silknotePatientUuid}`, error);
-                return false;
-            }
-        },
-
-        async getPatient(silknotePatientUuid: string): Promise<PatientDetails | null> {
-            if (!isInitialized) throw new Error('Prisma Adapter not initialized');
-            const client = getPrismaClient();
-            logInfo('Getting patient fileset', { silknotePatientUuid });
-            try {
-                // Use `client.silknotePatientFileset`
-                const fileset = await client.silknotePatientFileset.findUnique({
-                    where: { silknotePatientUuid: silknotePatientUuid },
-                });
-                if (!fileset) return null;
-                
-                const documents = await this.getDocumentsForPatient(silknotePatientUuid);
-
-                let vectorStore = null;
-                try {
-                    if (fileset.vectorStoreJson) {
-                        vectorStore = JSON.parse(fileset.vectorStoreJson);
-                    }
-                } catch(e) { logError('Failed to parse vectorStoreJson for patient', e, { silknotePatientUuid }); }
-
-                // --- Case Summary Validation Logic --- 
-                let caseSummary: CaseSummaryApiResponse | null = null;
-                let caseSummaryValid = false;
-                if (fileset.caseSummaryJson) {
-                    try {
-                        const parsedJson = JSON.parse(fileset.caseSummaryJson);
-                        // Check if the parsed object has the expected structure (summary + citations)
-                        if (parsedJson && typeof parsedJson === 'object' && 'summary' in parsedJson) {
-                             // Validate the nested summary object using the Zod schema
-                             const validatedSummary = parseCaseSummary(parsedJson.summary);
-                             if (validatedSummary) {
-                                 // If summary is valid, reconstruct the full response structure
-                                 caseSummary = {
-                                     summary: validatedSummary,
-                                     citations: Array.isArray(parsedJson.citations) ? parsedJson.citations : [],
-                                     // Include counts if they exist, otherwise default
-                                     summaryGenerationCount: parsedJson.summaryGenerationCount ?? fileset.summaryGenerationCount ?? 0,
-                                     maxCount: parsedJson.maxCount ?? 5
-                                 };
-                                 caseSummaryValid = true;
-                                 logInfo('Successfully parsed and validated existing case summary', { silknotePatientUuid });
-                             } else {
-                                 logError('Case summary structure validation failed (Zod parse failed)', null, { silknotePatientUuid });
-                             }
-                        } else {
-                             logError('Parsed caseSummaryJson lacks expected structure (missing summary field?)', null, { silknotePatientUuid });
-                        }
-                    } catch(e) { 
-                        logError('Failed to parse caseSummaryJson for patient', e, { silknotePatientUuid }); 
-                        // Keep caseSummary as null if parsing fails
-                    }
-                } else {
-                    logInfo('No caseSummaryJson found for patient', { silknotePatientUuid });
-                    // No JSON stored, so technically valid (empty)
-                    caseSummaryValid = true; 
+                if (!patientFileSet) {
+                    logger.warn(`[PRISMA] saveDocument: Patient ${silknotePatientUuid} not found for user ${silknoteUserUuid}.`);
+                    return false;
                 }
-                
-                // If validation failed, we treat it as if there's no summary
-                // The calling service should handle potential clearing/regeneration
-                if (!caseSummaryValid) {
-                    logWarn('Treating stored case summary as invalid/null due to parsing or validation errors.', { silknotePatientUuid });
-                    caseSummary = null;
-                }
-                // --- End Case Summary Validation Logic ---
 
-                const result: PatientDetails = {
-                    silknotePatientUuid: fileset.silknotePatientUuid,
-                    silknoteUserUuid: fileset.silknoteUserUuid,
-                    name: fileset.patientName || 'N/A',
-                    dateOfBirth: fileset.patientDob || '', 
-                    gender: fileset.gender || 'unknown',
-                    vectorStore: vectorStore,
-                    caseSummary: caseSummary, // Use the potentially nullified caseSummary
-                    summaryGenerationCount: caseSummary?.summaryGenerationCount ?? fileset.summaryGenerationCount ?? 0, // Use count from valid summary if available
-                    fileSet: documents, 
+                const documentData = {
+                    patientUuid: silknotePatientUuid,
+                    clientFileId: document.clientFileId,
+                    originalName: document.originalName,
+                    storedPath: document.storedPath,
+                    status: document.status,
+                    category: document.category,
+                    mimeType: document.type, 
+                    sizeBytes: document.size,
+                    pageCount: document.pageCount ?? 0,
+                    documentDate: medicalDateToPrismaInput(document.documentDate),
+                    uploadDate: medicalDateToPrismaInput(document.uploadDate) || new Date().toISOString(), 
+                    processedAt: medicalDateToPrismaInput(document.processedAt),
+                    title: document.title ?? document.originalName,
+                    author: document.author ?? '',
+                    sourceSystem: document.sourceSystem ?? 'upload',
+                    contentJson: JSON.stringify(document.content ?? defaultMedicalDocumentContent()),
+                    alertsJson: JSON.stringify(document.alerts ?? []),
                 };
-                return result;
-            } catch (error) {
-                logError(`Failed to get patient fileset ${silknotePatientUuid}`, error);
+                
+                const docUuid = document.silknoteDocumentUuid || uuidv4();
+
+                // For create, we need to use the relation instead of the foreign key
+                const { patientUuid, ...documentDataWithoutPatientUuid } = documentData;
+
+                await prisma.silknoteDocument.upsert({
+                    where: { silknoteDocumentUuid: docUuid }, 
+                    update: documentData as Prisma.SilknoteDocumentUpdateInput, 
+                    create: { 
+                        ...documentDataWithoutPatientUuid, 
+                        silknoteDocumentUuid: docUuid,
+                        patientFileset: { connect: { silknotePatientUuid } }
+                    },
+                });
+                return true;
+            } catch (error: any) {
+                logger.error(`[PRISMA] Error in saveDocument for clientFileId ${document.clientFileId}:`, error);
+                return false;
+            }
+        },
+
+        async getDocument(silknoteUserUuid: string, silknotePatientUuid: string, clientFileId: string): Promise<MedicalDocument | null> {
+            logger.info(`[PRISMA] getDocument for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}, clientFileId: ${clientFileId}`);
+            try {
+                const prismaDoc = await prisma.silknoteDocument.findFirst({
+                    where: {
+                        clientFileId: clientFileId,
+                        patientUuid: silknotePatientUuid,
+                        patientFileset: { silknoteUserUuid: silknoteUserUuid },
+                    },
+                    ...documentWithPatientContextArgs // Use predefined args for include
+                });
+                return mapPrismaDocumentToMedicalDocument(prismaDoc);
+            } catch (error: any) {
+                logger.error(`[PRISMA] Error in getDocument for clientFileId '${clientFileId}':`, error);
                 return null;
             }
         },
 
-        async getAllPatients(): Promise<PatientDetails[]> {
-             if (!isInitialized) throw new Error('Prisma Adapter not initialized');
-            const client = getPrismaClient();
-            logInfo('Getting all patient filesets');
-             try {
-                 // Use `client.silknotePatientFileset`
-                 const filesetIds = await client.silknotePatientFileset.findMany({ 
-                     select: { silknotePatientUuid: true }
-                 });
-                 const results = await Promise.all(filesetIds.map((fs: { silknotePatientUuid: string }) => this.getPatient(fs.silknotePatientUuid)));
-                 return results.filter((p: PatientDetails | null): p is PatientDetails => p !== null);
-             } catch (error) {
-                 logError('Failed to get all patient filesets', error);
-                 return [];
-             }
-        },
-
-        async updatePatient(patientUpdate: Partial<PatientDetails>): Promise<boolean> {
-            if (!isInitialized) throw new Error('Prisma Adapter not initialized');
-            const silknotePatientUuid = patientUpdate.silknotePatientUuid;
-            if (!silknotePatientUuid) {
-                 logError('Cannot update patient: silknotePatientUuid is missing in update data');
-                 return false;
+        async updateDocument(silknoteUserUuid: string, silknotePatientUuid: string, document: MedicalDocument): Promise<boolean> {
+            logger.info(`[PRISMA] updateDocument for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}, clientFileId: ${document.clientFileId}`);
+            const docUuid = document.silknoteDocumentUuid;
+            if (!docUuid) {
+                logger.error("[PRISMA] updateDocument: silknoteDocumentUuid is required.");
+                return false;
             }
-            logInfo('Updating patient fileset', { silknotePatientUuid });
-            const existingPatient = await this.getPatient(silknotePatientUuid);
-            if (!existingPatient) {
-                 logError(`Cannot update patient: Patient ${silknotePatientUuid} not found.`);
-                 return false;
-            }
-            const mergedPatient: PatientDetails = {
-                ...existingPatient,
-                ...patientUpdate,
-                fileSet: patientUpdate.fileSet ? patientUpdate.fileSet : existingPatient.fileSet,
-            };
-            return this.savePatient(mergedPatient);
-        },
+            try {
+                const existingDoc = await prisma.silknoteDocument.findFirst({
+                    where: {
+                        silknoteDocumentUuid: docUuid,
+                        patientUuid: silknotePatientUuid,
+                        patientFileset: { silknoteUserUuid: silknoteUserUuid }
+                    },
+                    select: { silknoteDocumentUuid: true } 
+                });
 
-        async deletePatient(silknotePatientUuid: string): Promise<boolean> {
-             if (!isInitialized) throw new Error('Prisma Adapter not initialized');
-            const client = getPrismaClient();
-            logInfo('Deleting patient fileset', { silknotePatientUuid });
-             try {
-                // Use `client.silknotePatientFileset`
-                await client.silknotePatientFileset.delete({ 
-                    where: { silknotePatientUuid: silknotePatientUuid } 
+                if (!existingDoc) {
+                    logger.warn(`[PRISMA] updateDocument: Doc ${docUuid} (client: ${document.clientFileId}) not found or not owned.`);
+                    return false;
+                }
+                
+                const documentDataToUpdate: Omit<Prisma.SilknoteDocumentUpdateInput, 'patientFileset' | 'patientUuid'> = {
+                    clientFileId: document.clientFileId,
+                    originalName: document.originalName,
+                    storedPath: document.storedPath,
+                    status: document.status,
+                    category: document.category,
+                    mimeType: document.type,
+                    sizeBytes: document.size,
+                    pageCount: document.pageCount ?? 0,
+                    documentDate: medicalDateToPrismaInput(document.documentDate),
+                    processedAt: medicalDateToPrismaInput(document.processedAt),
+                    title: document.title ?? document.originalName,
+                    author: document.author ?? '',
+                    sourceSystem: document.sourceSystem ?? 'upload',
+                    contentJson: JSON.stringify(document.content ?? defaultMedicalDocumentContent()),
+                    alertsJson: JSON.stringify(document.alerts ?? []),
+                };
+
+                await prisma.silknoteDocument.update({
+                    where: { silknoteDocumentUuid: docUuid },
+                    data: documentDataToUpdate,
                 });
                 return true;
             } catch (error: any) {
-                 if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
-                     logInfo(`Patient fileset ${silknotePatientUuid} not found for deletion.`);
-                     return true;
-                 }
-                logError(`Failed to delete patient fileset ${silknotePatientUuid}`, error);
+                logger.error(`[PRISMA] Error in updateDocument for ${document.clientFileId}:`, error);
                 return false;
             }
         },
 
-        async clearPatientCaseSummary(silknotePatientUuid: string): Promise<boolean> {
-            if (!isInitialized) throw new Error('Prisma Adapter not initialized');
-            const client = getPrismaClient();
-            logInfo('Clearing patient case summary', { silknotePatientUuid });
+        async deleteDocument(silknoteUserUuid: string, silknotePatientUuid: string, clientFileId: string): Promise<boolean> {
+            logger.info(`[PRISMA] deleteDocument for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}, clientFileId: ${clientFileId}`);
             try {
-                await client.silknotePatientFileset.update({
-                    where: { silknotePatientUuid: silknotePatientUuid },
-                    data: { 
-                        caseSummaryJson: null, // Set the JSON field to null
-                        summaryGenerationCount: 0 // Optionally reset the count
+                const deleteResult = await prisma.silknoteDocument.deleteMany({
+                    where: {
+                        clientFileId: clientFileId,
+                        patientUuid: silknotePatientUuid,
+                        patientFileset: { silknoteUserUuid: silknoteUserUuid }
                     }
                 });
-                logInfo('Successfully cleared case summary for patient', { silknotePatientUuid });
-                return true;
+                return deleteResult.count > 0;
             } catch (error: any) {
-                 if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
-                     // Patient not found is not necessarily an error for clearing, could return true or false based on desired behavior
-                     logInfo(`Patient fileset ${silknotePatientUuid} not found for clearing case summary.`);
-                     return true; // Or false if you consider patient not found an error
-                 }
-                logError(`Failed to clear case summary for patient ${silknotePatientUuid}`, error);
+                logger.error(`[PRISMA] Error in deleteDocument for clientFileId '${clientFileId}':`, error);
                 return false;
             }
         },
 
-        // --- Relationship Operations ---
-        async addDocumentToPatient(silknotePatientUuid: string, document: MedicalDocument): Promise<boolean> {
-             if (!isInitialized) throw new Error('Prisma Adapter not initialized');
-             const client = getPrismaClient();
-             try {
-                 // Use `client.silknotePatientFileset`
-                 await client.silknotePatientFileset.findUniqueOrThrow({ 
-                     where: { silknotePatientUuid: silknotePatientUuid } 
-                 });
-                 document.silknotePatientUuid = silknotePatientUuid;
-                 return this.saveDocument(document);
-             } catch (error: any) {
-                  if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
-                       logError(`Cannot add document: Patient fileset ${silknotePatientUuid} not found.`);
-                   } else {
-                       logError(`Error ensuring patient fileset ${silknotePatientUuid} exists`, error);
-                   }
-                  return false;
-             }
-        },
+        async getDocumentsForPatient(silknoteUserUuid: string, silknotePatientUuid: string): Promise<MedicalDocument[]> {
+            logger.info(`[PRISMA] getDocumentsForPatient for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}`);
+            try {
+                const patientFileset = await prisma.silknotePatientFileset.findUnique({
+                    where: { silknotePatientUuid, silknoteUserUuid },
+                    include: { documents: true } // Fetch full document objects
+                });
 
-        async getDocumentsForPatient(silknotePatientUuid: string): Promise<MedicalDocument[]> {
-             if (!isInitialized) throw new Error('Prisma Adapter not initialized');
-             const client = getPrismaClient();
-             logInfo('Getting documents for patient', { silknotePatientUuid });
-             try {
-                 // Use `client.silknoteDocument` and correct FK name `patientUuid`
-                 const prismaDocs = await client.silknoteDocument.findMany({
-                     where: { patientUuid: silknotePatientUuid },
-                     orderBy: { uploadDate: 'asc' }
-                 });
-                 // Use correct payload type
-                 return prismaDocs.map((prismaDoc: Prisma.SilknoteDocumentGetPayload<{}>) => mapPrismaDocToMedicalDoc(prismaDoc));
-             } catch (error) {
-                 logError(`Failed to get documents for patient ${silknotePatientUuid}`, error);
-                 return [];
-             }
+                if (!patientFileset) {
+                    logger.warn(`[PRISMA] getDocsForPatient: Patient ${silknotePatientUuid} for user ${silknoteUserUuid} not found.`);
+                    return [];
+                }
+                return patientFileset.documents.map(doc => mapPrismaDocumentToMedicalDocument(doc as SilknoteDocument & { patientFileset?: any })).filter(d => d !== null) as MedicalDocument[];
+            } catch (error: any) {
+                logger.error(`[PRISMA] Error in getDocumentsForPatient for patient '${silknotePatientUuid}':`, error);
+                return [];
+            }
         },
         
-        // --- Optional VSRX/Queue Methods (Adapted for Prisma `silknoteDocument` model) ---
-        async getQueuedDocuments(limit: number = 10): Promise<string[]> {
-            if (!isInitialized) throw new Error('Prisma Adapter not initialized');
-             const client = getPrismaClient();
-             logInfo('Getting queued documents (Prisma)', { limit });
-             try {
-                // Use `client.silknoteDocument`
-                const docs = await client.silknoteDocument.findMany({
-                    where: { status: 'queued' },
-                    select: { silknoteDocumentUuid: true },
-                    orderBy: { uploadDate: 'asc' },
-                    take: limit,
+        async addDocumentToPatient(silknoteUserUuid: string, silknotePatientUuid: string, document: MedicalDocument): Promise<boolean> {
+            logger.info(`[PRISMA] addDocumentToPatient for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}, clientFileId: ${document.clientFileId}`);
+             if (!document.silknoteDocumentUuid) {
+                document.silknoteDocumentUuid = uuidv4();
+                logger.info(`[PRISMA] addDocumentToPatient: Generated new silknoteDocumentUuid ${document.silknoteDocumentUuid}`);
+            }
+            return methods.saveDocument(silknoteUserUuid, silknotePatientUuid, document);
+        },
+
+        async savePatient(silknoteUserUuid: string, patientDetails: PatientDetails): Promise<boolean> {
+            logger.info(`[PRISMA] savePatient for user: ${silknoteUserUuid}, patientId: ${patientDetails.silknotePatientUuid}`);
+            try {
+                const patientDataForUpdate: Prisma.SilknotePatientFilesetUpdateInput = {
+                    patientName: patientDetails.name,
+                    patientDob: patientDetails.dateOfBirth, 
+                    gender: patientDetails.gender,
+                    vectorStoreJson: patientDetails.vectorStore ? JSON.stringify(patientDetails.vectorStore) : null,
+                    caseSummaryJson: patientDetails.caseSummary ? JSON.stringify(patientDetails.caseSummary) : null,
+                    summaryGenerationCount: patientDetails.summaryGenerationCount ?? 0,
+                    user: { connect: { id: silknoteUserUuid } } // Ensure user connection on update too
+                };
+                const patientDataForCreate: Prisma.SilknotePatientFilesetCreateInput = {
+                    silknotePatientUuid: patientDetails.silknotePatientUuid,
+                    user: { connect: { id: silknoteUserUuid } },
+                    patientName: patientDetails.name,
+                    patientDob: patientDetails.dateOfBirth,
+                    gender: patientDetails.gender,
+                    vectorStoreJson: patientDetails.vectorStore ? JSON.stringify(patientDetails.vectorStore) : null,
+                    caseSummaryJson: patientDetails.caseSummary ? JSON.stringify(patientDetails.caseSummary) : null,
+                    summaryGenerationCount: patientDetails.summaryGenerationCount ?? 0,
+                };
+
+                await prisma.silknotePatientFileset.upsert({
+                    where: { silknotePatientUuid: patientDetails.silknotePatientUuid },
+                    update: patientDataForUpdate, 
+                    create: patientDataForCreate,
                 });
-                return docs.map((d: { silknoteDocumentUuid: string }) => d.silknoteDocumentUuid);
-             } catch (error) {
-                logError('Failed to get queued documents', error);
-                return [];
-             }
-        },
-        async setDocumentStatus(silknoteDocumentUuid: string, status: string): Promise<boolean> {
-             if (!isInitialized) throw new Error('Prisma Adapter not initialized');
-             const client = getPrismaClient();
-             logInfo('Setting document status (Prisma)', { silknoteDocumentUuid, status });
-              try {
-                  // Use `client.silknoteDocument`
-                  await client.silknoteDocument.update({ 
-                      where: { silknoteDocumentUuid: silknoteDocumentUuid }, 
-                      data: { status: status }
-                  });
-                  return true;
-              } catch (error: any) {
-                 if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
-                     logError(`Document ${silknoteDocumentUuid} not found for status update.`);
-                 } else {
-                    logError(`Failed to set status for document ${silknoteDocumentUuid}`, error);
-                 }
-                 return false;
-              }
-        },
-        async resetProcessingDocuments(): Promise<number> {
-             if (!isInitialized) throw new Error('Prisma Adapter not initialized');
-             const client = getPrismaClient();
-             logInfo('Resetting processing documents (Prisma)');
-             try {
-                // Use `client.silknoteDocument`
-                const result = await client.silknoteDocument.updateMany({
-                    where: { status: 'processing' },
-                    data: { status: 'queued' }
-                });
-                logInfo(`Reset ${result.count} documents.`);
-                return result.count;
-             } catch (error) {
-                 logError('Failed to reset processing documents', error);
-                 return 0;
-             }
-        },
-        async forceReprocessPatientDocuments(silknotePatientUuid: string): Promise<number> {
-             if (!isInitialized) throw new Error('Prisma Adapter not initialized');
-             const client = getPrismaClient();
-             logInfo('Forcing reprocess for patient documents (Prisma)', { silknotePatientUuid });
-              try {
-                // Use `client.silknoteDocument` and correct FK name `patientUuid`
-                const result = await client.silknoteDocument.updateMany({
-                    where: { patientUuid: silknotePatientUuid, NOT: { status: 'queued' } }, 
-                    data: { status: 'queued' }
-                });
-                logInfo(`Queued ${result.count} documents for reprocessing for patient ${silknotePatientUuid}.`);
-                return result.count;
-             } catch (error) {
-                 logError(`Failed to force reprocess for patient ${silknotePatientUuid}`, error);
-                 return 0;
-             }
-        },
-        async forceReprocessDocument(silknoteDocumentUuid: string): Promise<boolean> {
-            // Check if setDocumentStatus exists before calling it
-            if (typeof this.setDocumentStatus === 'function') {
-                return this.setDocumentStatus(silknoteDocumentUuid, 'queued');
-            } else {
-                logError('setDocumentStatus method is not available on this adapter instance.');
+                return true;
+            } catch (error: any) {
+                logger.error(`[PRISMA] Error in savePatient for patient '${patientDetails.silknotePatientUuid}':`, error);
                 return false;
             }
         },
 
-        // --- NEW Alert Method --- 
-        async acknowledgeDocumentAlert(silknotePatientUuid: string, silknoteDocumentUuid: string, alertType: DocumentAlertType): Promise<boolean> {
-            if (!isInitialized) throw new Error('Prisma Adapter not initialized');
-            const client = getPrismaClient();
-            logInfo('Acknowledging document alert', { silknotePatientUuid, silknoteDocumentUuid, alertType });
-
+        async getPatient(silknoteUserUuid: string, silknotePatientUuid: string): Promise<PatientDetails | null> {
+            logger.info(`[PRISMA] getPatient for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}`);
             try {
-                // 1. Fetch the document ensuring it belongs to the patient
-                const document = await client.silknoteDocument.findUnique({
-                    where: { 
-                        silknoteDocumentUuid: silknoteDocumentUuid,
-                        patientUuid: silknotePatientUuid // Ensure doc belongs to patient
-                    },
-                    select: { alertsJson: true } // Only select the alerts field
+                const patientFileset = await prisma.silknotePatientFileset.findUnique({
+                    where: { silknotePatientUuid, silknoteUserUuid },
+                    ...patientWithFullDocumentsArgs // Use predefined args for include
+                });
+                return mapPrismaPatientToPatientDetails(patientFileset);
+            } catch (error: any) {
+                logger.error(`[PRISMA] Error in getPatient for patient '${silknotePatientUuid}':`, error);
+                return null;
+            }
+        },
+
+        async getAllPatients(silknoteUserUuid: string): Promise<PatientDetails[]> {
+            logger.info(`[PRISMA] getAllPatients for user: ${silknoteUserUuid}`);
+            try {
+                const patientFilesets = await prisma.silknotePatientFileset.findMany({
+                    where: { silknoteUserUuid: silknoteUserUuid },
+                    ...patientWithFullDocumentsArgs // Use predefined args for include
+                });
+                return patientFilesets.map(pf => mapPrismaPatientToPatientDetails(pf)).filter(p => p !== null) as PatientDetails[];
+            } catch (error: any) {
+                logger.error(`[PRISMA] Error in getAllPatients for user '${silknoteUserUuid}':`, error);
+                return [];
+            }
+        },
+
+        async updatePatient(silknoteUserUuid: string, silknotePatientUuid: string, patientUpdates: Partial<PatientDetails>): Promise<boolean> {
+            logger.info(`[PRISMA] updatePatient for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}`);
+            try {
+                const dataToUpdate: Partial<Prisma.SilknotePatientFilesetUpdateInput> = {};
+                if (patientUpdates.name !== undefined) dataToUpdate.patientName = patientUpdates.name;
+                if (patientUpdates.dateOfBirth !== undefined) dataToUpdate.patientDob = patientUpdates.dateOfBirth;
+                if (patientUpdates.gender !== undefined) dataToUpdate.gender = patientUpdates.gender;
+                if (patientUpdates.vectorStore !== undefined) dataToUpdate.vectorStoreJson = JSON.stringify(patientUpdates.vectorStore);
+                if (patientUpdates.caseSummary !== undefined) dataToUpdate.caseSummaryJson = JSON.stringify(patientUpdates.caseSummary);
+                if (patientUpdates.summaryGenerationCount !== undefined) dataToUpdate.summaryGenerationCount = patientUpdates.summaryGenerationCount;
+
+                if (Object.keys(dataToUpdate).length === 0) {
+                    logger.info(`[PRISMA] updatePatient: No valid fields to update for patient ${silknotePatientUuid}.`);
+                    return true; 
+                }
+
+                const updateResult = await prisma.silknotePatientFileset.updateMany({
+                    where: { silknotePatientUuid, silknoteUserUuid },
+                    data: dataToUpdate,
+                });
+                return updateResult.count > 0;
+            } catch (error: any) {
+                logger.error(`[PRISMA] Error in updatePatient for patient '${silknotePatientUuid}':`, error);
+                return false;
+            }
+        },
+
+        async deletePatient(silknoteUserUuid: string, silknotePatientUuid: string): Promise<boolean> {
+            logger.info(`[PRISMA] deletePatient for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}`);
+            try {
+                const deleteResult = await prisma.silknotePatientFileset.deleteMany({
+                    where: { silknotePatientUuid, silknoteUserUuid },
+                });
+                return deleteResult.count > 0;
+            } catch (error: any) {
+                logger.error(`[PRISMA] Error in deletePatient for patient '${silknotePatientUuid}':`, error);
+                return false;
+            }
+        },
+
+        async clearPatientCaseSummary(silknoteUserUuid: string, silknotePatientUuid: string): Promise<boolean> {
+            logger.info(`[PRISMA] clearPatientCaseSummary for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}`);
+            try {
+                const updateResult = await prisma.silknotePatientFileset.updateMany({
+                    where: { silknotePatientUuid, silknoteUserUuid },
+                    data: { caseSummaryJson: null, summaryGenerationCount: 0 },
+                });
+                return updateResult.count > 0;
+            } catch (error: any) {
+                logger.error(`[PRISMA] Error in clearPatientCaseSummary for patient '${silknotePatientUuid}':`, error);
+                return false;
+            }
+        },
+        
+        async acknowledgeDocumentAlert(silknoteUserUuid: string, silknotePatientUuid: string, silknoteDocumentUuid: string, alertType: DocumentAlertType): Promise<boolean> {
+            logger.info(`[PRISMA] acknowledgeDocumentAlert for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}, docUuid: ${silknoteDocumentUuid}, alertType: ${alertType}`);
+            try {
+                const document = await prisma.silknoteDocument.findFirst({
+                    where: { silknoteDocumentUuid, patientUuid: silknotePatientUuid, patientFileset: { silknoteUserUuid } },
+                    select: { alertsJson: true, clientFileId: true } 
                 });
 
-                if (!document) {
-                    logError('Document not found or does not belong to patient', null, { silknoteDocumentUuid, silknotePatientUuid });
+                if (!document || !document.alertsJson ) {
+                    logger.warn(`[PRISMA] ack Alert: Doc ${silknoteDocumentUuid} (client: ${document?.clientFileId}) not found, no alerts JSON, or not owned.`);
                     return false;
                 }
 
-                // 2. Parse alerts JSON
-                let alerts: DocumentAlert[] = [];
-                let requiresUpdate = false;
-                try {
-                    if (document.alertsJson) {
-                        alerts = JSON.parse(document.alertsJson);
-                    } else {
-                        logInfo('No alertsJson found for document, nothing to acknowledge', { silknoteDocumentUuid });
-                        return true; // No alerts present, technically successful
-                    }
-                    if (!Array.isArray(alerts)) {
-                        logError('Parsed alertsJson is not an array', null, { silknoteDocumentUuid });
-                        // Treat as corrupted data, maybe return false or clean up?
-                        alerts = []; 
-                        return false; // Indicate failure due to bad data
-                    }
-                } catch (e) {
-                    logError('Failed to parse alertsJson', e, { silknoteDocumentUuid });
-                    return false; // Indicate failure due to bad data
-                }
-
-                // 3. Modify alerts in memory
+                const alerts: DocumentAlert[] = JSON.parse(document.alertsJson);
+                let alertFoundAndUpdated = false;
                 const updatedAlerts = alerts.map(alert => {
                     if (alert.type === alertType && !alert.acknowledged) {
-                        requiresUpdate = true;
-                        logInfo(`Marking alert type ${alertType} as acknowledged`, { silknoteDocumentUuid });
-                        return { ...alert, acknowledged: true };
+                        alertFoundAndUpdated = true;
+                        return { ...alert, acknowledged: true, acknowledgedAt: new Date().toISOString() };
                     }
                     return alert;
                 });
 
-                // 4. If modified, update the database
-                if (requiresUpdate) {
-                    const updatedAlertsJson = JSON.stringify(updatedAlerts);
-                    await client.silknoteDocument.update({
-                        where: { silknoteDocumentUuid: silknoteDocumentUuid },
-                        data: { alertsJson: updatedAlertsJson }
-                    });
-                    logInfo('Successfully updated alertsJson in database', { silknoteDocumentUuid });
-                    return true;
-                } else {
-                    logInfo('No unacknowledged alerts of the specified type found, no update needed', { silknoteDocumentUuid, alertType });
-                    return true; // No action needed, but operation was successful
+                if (!alertFoundAndUpdated) {
+                    logger.info(`[PRISMA] ack Alert: Type ${alertType} not found or already ack for doc ${silknoteDocumentUuid}.`);
+                    return false; 
                 }
 
-            } catch (error) {
-                logError('Error acknowledging document alert', error, { silknoteDocumentUuid, alertType });
+                await prisma.silknoteDocument.update({
+                    where: { silknoteDocumentUuid: silknoteDocumentUuid },
+                    data: { alertsJson: JSON.stringify(updatedAlerts) }
+                });
+                return true;
+            } catch (error: any) {
+                logger.error(`[PRISMA] Error in acknowledgeDocumentAlert for docUuid '${silknoteDocumentUuid}':`, error);
                 return false;
             }
-        }
+        },
 
+        async getQueuedDocuments(silknoteUserUuid: string, silknotePatientUuid: string, limit: number = 10): Promise<string[]> {
+            logger.info(`[PRISMA] getQueuedDocuments for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}, limit: ${limit}`);
+            try {
+                const documents = await prisma.silknoteDocument.findMany({
+                    where: { patientUuid: silknotePatientUuid, patientFileset: { silknoteUserUuid }, status: 'queued' },
+                    take: limit,
+                    orderBy: { uploadDate: 'asc' },
+                    select: { clientFileId: true } 
+                });
+                return documents.map(doc => doc.clientFileId).filter(id => !!id) as string[];
+            } catch (error) {
+                logger.error(`[PRISMA] Error fetching queued documents for patient ${silknotePatientUuid}, user ${silknoteUserUuid}`, error);
+                return [];
+            }
+        },
+
+        async setDocumentStatus(silknoteUserUuid: string, silknotePatientUuid: string, silknoteDocumentUuid: string, status: string): Promise<boolean> {
+            logger.info(`[PRISMA] setDocumentStatus for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}, docUuid: ${silknoteDocumentUuid}, status: ${status}`);
+            try {
+                const updateResult = await prisma.silknoteDocument.updateMany({
+                    where: { silknoteDocumentUuid, patientUuid: silknotePatientUuid, patientFileset: { silknoteUserUuid } },
+                    data: { status: status }
+                });
+                return updateResult.count > 0;
+            } catch (error: any) {
+                logger.error(`[PRISMA] Error setting document status for docUuid ${silknoteDocumentUuid}`, error);
+                return false;
+            }
+        },
+
+        async resetProcessingDocuments(): Promise<number> {
+            logger.info(`[PRISMA] resetProcessingDocuments (global)`);
+            try {
+                const updateResult = await prisma.silknoteDocument.updateMany({
+                    where: { status: 'processing' },
+                    data: { status: 'queued' }
+                });
+                return updateResult.count;
+            } catch (error: any) {
+                logger.error(`[PRISMA] Error resetting processing documents`, error);
+                return 0;
+            }
+        },
+
+        async forceReprocessPatientDocuments(silknoteUserUuid: string, silknotePatientUuid: string): Promise<number> {
+            logger.info(`[PRISMA] forceReprocessPatientDocuments for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}`);
+            try {
+                const updateResult = await prisma.silknoteDocument.updateMany({
+                    where: { patientUuid: silknotePatientUuid, patientFileset: { silknoteUserUuid } },
+                    data: { status: 'queued' }
+                });
+                return updateResult.count;
+            } catch (error: any) {
+                logger.error(`[PRISMA] Error in forceReprocessPatientDocuments for patient ${silknotePatientUuid}`, error);
+                return 0;
+            }
+        },
+
+        async forceReprocessDocument(silknoteUserUuid: string, silknotePatientUuid: string, silknoteDocumentUuid: string): Promise<boolean> {
+            logger.info(`[PRISMA] forceReprocessDocument for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}, docUuid: ${silknoteDocumentUuid}`);
+            // Directly call the method on the returned adapter object (this)
+            return methods.setDocumentStatus(silknoteUserUuid, silknotePatientUuid, silknoteDocumentUuid, 'queued');
+        }
     };
+
+    // Remove the problematic self-referential assignment block
+    // The methods are defined directly on the object returned below
+
+    return {
+        /* Re-define all methods here directly, copying implementations from above */
+        /* This will ensure 'this' context is correct for internal calls */
+        async initialize(): Promise<{ success: boolean; errors: StorageError[] }> {
+            try {
+                await prisma.$connect();
+                logger.info('Prisma client connected successfully.');
+                return { success: true, errors: [] };
+            } catch (error: any) {
+                logger.error('Prisma client connection failed:', error);
+                return { success: false, errors: [{ code: 'DB_CONN_ERROR', message: error.message }] };
+            }
+        },
+
+        async saveDocument(silknoteUserUuid: string, silknotePatientUuid: string, document: MedicalDocument): Promise<boolean> {
+            logger.info(`[PRISMA] saveDocument for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}, clientFileId: ${document.clientFileId}`);
+            try {
+                const patientFileSet = await prisma.silknotePatientFileset.findUnique({
+                    where: { silknotePatientUuid, silknoteUserUuid },
+                });
+                if (!patientFileSet) {
+                    logger.warn(`[PRISMA] saveDocument: Patient ${silknotePatientUuid} not found for user ${silknoteUserUuid}.`);
+                    return false;
+                }
+
+                const documentData = {
+                    patientUuid: silknotePatientUuid,
+                    clientFileId: document.clientFileId,
+                    originalName: document.originalName,
+                    storedPath: document.storedPath,
+                    status: document.status,
+                    category: document.category,
+                    mimeType: document.type, 
+                    sizeBytes: document.size,
+                    pageCount: document.pageCount ?? 0,
+                    documentDate: medicalDateToPrismaInput(document.documentDate),
+                    uploadDate: medicalDateToPrismaInput(document.uploadDate) || new Date().toISOString(), 
+                    processedAt: medicalDateToPrismaInput(document.processedAt),
+                    title: document.title ?? document.originalName,
+                    author: document.author ?? '',
+                    sourceSystem: document.sourceSystem ?? 'upload',
+                    contentJson: JSON.stringify(document.content ?? defaultMedicalDocumentContent()),
+                    alertsJson: JSON.stringify(document.alerts ?? []),
+                };
+                
+                const docUuid = document.silknoteDocumentUuid || uuidv4();
+
+                // For create, we need to use the relation instead of the foreign key
+                const { patientUuid, ...documentDataWithoutPatientUuid } = documentData;
+
+                await prisma.silknoteDocument.upsert({
+                    where: { silknoteDocumentUuid: docUuid }, 
+                    update: documentData as Prisma.SilknoteDocumentUpdateInput, 
+                    create: { 
+                        ...documentDataWithoutPatientUuid, 
+                        silknoteDocumentUuid: docUuid,
+                        patientFileset: { connect: { silknotePatientUuid } }
+                    },
+                });
+                return true;
+            } catch (error: any) {
+                logger.error(`[PRISMA] Error in saveDocument for clientFileId ${document.clientFileId}:`, error);
+                return false;
+            }
+        },
+
+        async getDocument(silknoteUserUuid: string, silknotePatientUuid: string, clientFileId: string): Promise<MedicalDocument | null> {
+            logger.info(`[PRISMA] getDocument for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}, clientFileId: ${clientFileId}`);
+            try {
+                const prismaDoc = await prisma.silknoteDocument.findFirst({
+                    where: {
+                        clientFileId: clientFileId,
+                        patientUuid: silknotePatientUuid,
+                        patientFileset: { silknoteUserUuid: silknoteUserUuid },
+                    },
+                    ...documentWithPatientContextArgs 
+                });
+                return mapPrismaDocumentToMedicalDocument(prismaDoc);
+            } catch (error: any) {
+                logger.error(`[PRISMA] Error in getDocument for clientFileId '${clientFileId}':`, error);
+                return null;
+            }
+        },
+
+        async updateDocument(silknoteUserUuid: string, silknotePatientUuid: string, document: MedicalDocument): Promise<boolean> {
+            logger.info(`[PRISMA] updateDocument for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}, clientFileId: ${document.clientFileId}`);
+            const docUuid = document.silknoteDocumentUuid;
+            if (!docUuid) {
+                logger.error("[PRISMA] updateDocument: silknoteDocumentUuid is required.");
+                return false;
+            }
+            try {
+                const existingDoc = await prisma.silknoteDocument.findFirst({
+                    where: {
+                        silknoteDocumentUuid: docUuid,
+                        patientUuid: silknotePatientUuid,
+                        patientFileset: { silknoteUserUuid: silknoteUserUuid }
+                    },
+                    select: { silknoteDocumentUuid: true } 
+                });
+
+                if (!existingDoc) {
+                    logger.warn(`[PRISMA] updateDocument: Doc ${docUuid} (client: ${document.clientFileId}) not found or not owned.`);
+                    return false;
+                }
+                
+                const documentDataToUpdate: Omit<Prisma.SilknoteDocumentUpdateInput, 'patientFileset' | 'patientUuid'> = {
+                    clientFileId: document.clientFileId,
+                    originalName: document.originalName,
+                    storedPath: document.storedPath,
+                    status: document.status,
+                    category: document.category,
+                    mimeType: document.type,
+                    sizeBytes: document.size,
+                    pageCount: document.pageCount ?? 0,
+                    documentDate: medicalDateToPrismaInput(document.documentDate),
+                    processedAt: medicalDateToPrismaInput(document.processedAt),
+                    title: document.title ?? document.originalName,
+                    author: document.author ?? '',
+                    sourceSystem: document.sourceSystem ?? 'upload',
+                    contentJson: JSON.stringify(document.content ?? defaultMedicalDocumentContent()),
+                    alertsJson: JSON.stringify(document.alerts ?? []),
+                };
+
+                await prisma.silknoteDocument.update({
+                    where: { silknoteDocumentUuid: docUuid },
+                    data: documentDataToUpdate,
+                });
+                return true;
+            } catch (error: any) {
+                logger.error(`[PRISMA] Error in updateDocument for ${document.clientFileId}:`, error);
+                return false;
+            }
+        },
+
+        async deleteDocument(silknoteUserUuid: string, silknotePatientUuid: string, clientFileId: string): Promise<boolean> {
+            logger.info(`[PRISMA] deleteDocument for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}, clientFileId: ${clientFileId}`);
+            try {
+                const deleteResult = await prisma.silknoteDocument.deleteMany({
+                    where: {
+                        clientFileId: clientFileId,
+                        patientUuid: silknotePatientUuid,
+                        patientFileset: { silknoteUserUuid: silknoteUserUuid }
+                    }
+                });
+                return deleteResult.count > 0;
+            } catch (error: any) {
+                logger.error(`[PRISMA] Error in deleteDocument for clientFileId '${clientFileId}':`, error);
+                return false;
+            }
+        },
+
+        async getDocumentsForPatient(silknoteUserUuid: string, silknotePatientUuid: string): Promise<MedicalDocument[]> {
+            logger.info(`[PRISMA] getDocumentsForPatient for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}`);
+            try {
+                const patientFileset = await prisma.silknotePatientFileset.findUnique({
+                    where: { silknotePatientUuid, silknoteUserUuid },
+                    include: { documents: true } 
+                });
+
+                if (!patientFileset) {
+                    logger.warn(`[PRISMA] getDocsForPatient: Patient ${silknotePatientUuid} for user ${silknoteUserUuid} not found.`);
+                    return [];
+                }
+                return patientFileset.documents.map(doc => mapPrismaDocumentToMedicalDocument(doc as SilknoteDocument & { patientFileset?: any })).filter(d => d !== null) as MedicalDocument[];
+            } catch (error: any) {
+                logger.error(`[PRISMA] Error in getDocumentsForPatient for patient '${silknotePatientUuid}':`, error);
+                return [];
+            }
+        },
+        
+        async addDocumentToPatient(silknoteUserUuid: string, silknotePatientUuid: string, document: MedicalDocument): Promise<boolean> {
+            logger.info(`[PRISMA] addDocumentToPatient for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}, clientFileId: ${document.clientFileId}`);
+             if (!document.silknoteDocumentUuid) {
+                document.silknoteDocumentUuid = uuidv4();
+                logger.info(`[PRISMA] addDocumentToPatient: Generated new silknoteDocumentUuid ${document.silknoteDocumentUuid}`);
+            }
+            return methods.saveDocument(silknoteUserUuid, silknotePatientUuid, document);
+        },
+
+        async savePatient(silknoteUserUuid: string, patientDetails: PatientDetails): Promise<boolean> {
+            logger.info(`[PRISMA] savePatient for user: ${silknoteUserUuid}, patientId: ${patientDetails.silknotePatientUuid}`);
+            try {
+                const patientDataForUpdate: Prisma.SilknotePatientFilesetUpdateInput = {
+                    patientName: patientDetails.name,
+                    patientDob: patientDetails.dateOfBirth, 
+                    gender: patientDetails.gender,
+                    vectorStoreJson: patientDetails.vectorStore ? JSON.stringify(patientDetails.vectorStore) : null,
+                    caseSummaryJson: patientDetails.caseSummary ? JSON.stringify(patientDetails.caseSummary) : null,
+                    summaryGenerationCount: patientDetails.summaryGenerationCount ?? 0,
+                    user: { connect: { id: silknoteUserUuid } } // Ensure user connection on update too
+                };
+                const patientDataForCreate: Prisma.SilknotePatientFilesetCreateInput = {
+                    silknotePatientUuid: patientDetails.silknotePatientUuid,
+                    user: { connect: { id: silknoteUserUuid } },
+                    patientName: patientDetails.name,
+                    patientDob: patientDetails.dateOfBirth,
+                    gender: patientDetails.gender,
+                    vectorStoreJson: patientDetails.vectorStore ? JSON.stringify(patientDetails.vectorStore) : null,
+                    caseSummaryJson: patientDetails.caseSummary ? JSON.stringify(patientDetails.caseSummary) : null,
+                    summaryGenerationCount: patientDetails.summaryGenerationCount ?? 0,
+                };
+
+                await prisma.silknotePatientFileset.upsert({
+                    where: { silknotePatientUuid: patientDetails.silknotePatientUuid },
+                    update: patientDataForUpdate, 
+                    create: patientDataForCreate,
+                });
+                return true;
+            } catch (error: any) {
+                logger.error(`[PRISMA] Error in savePatient for patient '${patientDetails.silknotePatientUuid}':`, error);
+                return false;
+            }
+        },
+
+        async getPatient(silknoteUserUuid: string, silknotePatientUuid: string): Promise<PatientDetails | null> {
+            logger.info(`[PRISMA] getPatient for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}`);
+            try {
+                const patientFileset = await prisma.silknotePatientFileset.findUnique({
+                    where: { silknotePatientUuid, silknoteUserUuid },
+                    ...patientWithFullDocumentsArgs // Use predefined args for include
+                });
+                return mapPrismaPatientToPatientDetails(patientFileset);
+            } catch (error: any) {
+                logger.error(`[PRISMA] Error in getPatient for patient '${silknotePatientUuid}':`, error);
+                return null;
+            }
+        },
+
+        async getAllPatients(silknoteUserUuid: string): Promise<PatientDetails[]> {
+            logger.info(`[PRISMA] getAllPatients for user: ${silknoteUserUuid}`);
+            try {
+                const patientFilesets = await prisma.silknotePatientFileset.findMany({
+                    where: { silknoteUserUuid: silknoteUserUuid },
+                    ...patientWithFullDocumentsArgs // Use predefined args for include
+                });
+                return patientFilesets.map(pf => mapPrismaPatientToPatientDetails(pf)).filter(p => p !== null) as PatientDetails[];
+            } catch (error: any) {
+                logger.error(`[PRISMA] Error in getAllPatients for user '${silknoteUserUuid}':`, error);
+                return [];
+            }
+        },
+
+        async updatePatient(silknoteUserUuid: string, silknotePatientUuid: string, patientUpdates: Partial<PatientDetails>): Promise<boolean> {
+            logger.info(`[PRISMA] updatePatient for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}`);
+            try {
+                const dataToUpdate: Partial<Prisma.SilknotePatientFilesetUpdateInput> = {};
+                if (patientUpdates.name !== undefined) dataToUpdate.patientName = patientUpdates.name;
+                if (patientUpdates.dateOfBirth !== undefined) dataToUpdate.patientDob = patientUpdates.dateOfBirth;
+                if (patientUpdates.gender !== undefined) dataToUpdate.gender = patientUpdates.gender;
+                if (patientUpdates.vectorStore !== undefined) dataToUpdate.vectorStoreJson = JSON.stringify(patientUpdates.vectorStore);
+                if (patientUpdates.caseSummary !== undefined) dataToUpdate.caseSummaryJson = JSON.stringify(patientUpdates.caseSummary);
+                if (patientUpdates.summaryGenerationCount !== undefined) dataToUpdate.summaryGenerationCount = patientUpdates.summaryGenerationCount;
+
+                if (Object.keys(dataToUpdate).length === 0) {
+                    logger.info(`[PRISMA] updatePatient: No valid fields to update for patient ${silknotePatientUuid}.`);
+                    return true; 
+                }
+
+                const updateResult = await prisma.silknotePatientFileset.updateMany({
+                    where: { silknotePatientUuid, silknoteUserUuid },
+                    data: dataToUpdate,
+                });
+                return updateResult.count > 0;
+            } catch (error: any) {
+                logger.error(`[PRISMA] Error in updatePatient for patient '${silknotePatientUuid}':`, error);
+                return false;
+            }
+        },
+
+        async deletePatient(silknoteUserUuid: string, silknotePatientUuid: string): Promise<boolean> {
+            logger.info(`[PRISMA] deletePatient for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}`);
+            try {
+                const deleteResult = await prisma.silknotePatientFileset.deleteMany({
+                    where: { silknotePatientUuid, silknoteUserUuid },
+                });
+                return deleteResult.count > 0;
+            } catch (error: any) {
+                logger.error(`[PRISMA] Error in deletePatient for patient '${silknotePatientUuid}':`, error);
+                return false;
+            }
+        },
+
+        async clearPatientCaseSummary(silknoteUserUuid: string, silknotePatientUuid: string): Promise<boolean> {
+            logger.info(`[PRISMA] clearPatientCaseSummary for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}`);
+            try {
+                const updateResult = await prisma.silknotePatientFileset.updateMany({
+                    where: { silknotePatientUuid, silknoteUserUuid },
+                    data: { caseSummaryJson: null, summaryGenerationCount: 0 },
+                });
+                return updateResult.count > 0;
+            } catch (error: any) {
+                logger.error(`[PRISMA] Error in clearPatientCaseSummary for patient '${silknotePatientUuid}':`, error);
+                return false;
+            }
+        },
+        
+        async acknowledgeDocumentAlert(silknoteUserUuid: string, silknotePatientUuid: string, silknoteDocumentUuid: string, alertType: DocumentAlertType): Promise<boolean> {
+            logger.info(`[PRISMA] acknowledgeDocumentAlert for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}, docUuid: ${silknoteDocumentUuid}, alertType: ${alertType}`);
+            try {
+                const document = await prisma.silknoteDocument.findFirst({
+                    where: { silknoteDocumentUuid, patientUuid: silknotePatientUuid, patientFileset: { silknoteUserUuid } },
+                    select: { alertsJson: true, clientFileId: true } 
+                });
+
+                if (!document || !document.alertsJson ) {
+                    logger.warn(`[PRISMA] ack Alert: Doc ${silknoteDocumentUuid} (client: ${document?.clientFileId}) not found, no alerts JSON, or not owned.`);
+                    return false;
+                }
+
+                const alerts: DocumentAlert[] = JSON.parse(document.alertsJson);
+                let alertFoundAndUpdated = false;
+                const updatedAlerts = alerts.map(alert => {
+                    if (alert.type === alertType && !alert.acknowledged) {
+                        alertFoundAndUpdated = true;
+                        return { ...alert, acknowledged: true, acknowledgedAt: new Date().toISOString() };
+                    }
+                    return alert;
+                });
+
+                if (!alertFoundAndUpdated) {
+                    logger.info(`[PRISMA] ack Alert: Type ${alertType} not found or already ack for doc ${silknoteDocumentUuid}.`);
+                    return false; 
+                }
+
+                await prisma.silknoteDocument.update({
+                    where: { silknoteDocumentUuid: silknoteDocumentUuid },
+                    data: { alertsJson: JSON.stringify(updatedAlerts) }
+                });
+                return true;
+            } catch (error: any) {
+                logger.error(`[PRISMA] Error in acknowledgeDocumentAlert for docUuid '${silknoteDocumentUuid}':`, error);
+                return false;
+            }
+        },
+
+        async getQueuedDocuments(silknoteUserUuid: string, silknotePatientUuid: string, limit: number = 10): Promise<string[]> {
+            logger.info(`[PRISMA] getQueuedDocuments for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}, limit: ${limit}`);
+            try {
+                const documents = await prisma.silknoteDocument.findMany({
+                    where: { patientUuid: silknotePatientUuid, patientFileset: { silknoteUserUuid }, status: 'queued' },
+                    take: limit,
+                    orderBy: { uploadDate: 'asc' },
+                    select: { clientFileId: true } 
+                });
+                return documents.map(doc => doc.clientFileId).filter(id => !!id) as string[];
+            } catch (error) {
+                logger.error(`[PRISMA] Error fetching queued documents for patient ${silknotePatientUuid}, user ${silknoteUserUuid}`, error);
+                return [];
+            }
+        },
+
+        async setDocumentStatus(silknoteUserUuid: string, silknotePatientUuid: string, silknoteDocumentUuid: string, status: string): Promise<boolean> {
+            logger.info(`[PRISMA] setDocumentStatus for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}, docUuid: ${silknoteDocumentUuid}, status: ${status}`);
+            try {
+                const updateResult = await prisma.silknoteDocument.updateMany({
+                    where: { silknoteDocumentUuid, patientUuid: silknotePatientUuid, patientFileset: { silknoteUserUuid } },
+                    data: { status: status }
+                });
+                return updateResult.count > 0;
+            } catch (error: any) {
+                logger.error(`[PRISMA] Error setting document status for docUuid ${silknoteDocumentUuid}`, error);
+                return false;
+            }
+        },
+
+        async resetProcessingDocuments(): Promise<number> {
+            logger.info(`[PRISMA] resetProcessingDocuments (global)`);
+            try {
+                const updateResult = await prisma.silknoteDocument.updateMany({
+                    where: { status: 'processing' },
+                    data: { status: 'queued' }
+                });
+                return updateResult.count;
+            } catch (error: any) {
+                logger.error(`[PRISMA] Error resetting processing documents`, error);
+                return 0;
+            }
+        },
+
+        async forceReprocessPatientDocuments(silknoteUserUuid: string, silknotePatientUuid: string): Promise<number> {
+            logger.info(`[PRISMA] forceReprocessPatientDocuments for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}`);
+            try {
+                const updateResult = await prisma.silknoteDocument.updateMany({
+                    where: { patientUuid: silknotePatientUuid, patientFileset: { silknoteUserUuid } },
+                    data: { status: 'queued' }
+                });
+                return updateResult.count;
+            } catch (error: any) {
+                logger.error(`[PRISMA] Error in forceReprocessPatientDocuments for patient ${silknotePatientUuid}`, error);
+                return 0;
+            }
+        },
+
+        async forceReprocessDocument(silknoteUserUuid: string, silknotePatientUuid: string, silknoteDocumentUuid: string): Promise<boolean> {
+            logger.info(`[PRISMA] forceReprocessDocument for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}, docUuid: ${silknoteDocumentUuid}`);
+            // Directly call the method on the returned adapter object (this)
+            return methods.setDocumentStatus(silknoteUserUuid, silknotePatientUuid, silknoteDocumentUuid, 'queued');
+        }
+    }; 
+    // Remove the incorrect adapterMethods self-assignment block
 }

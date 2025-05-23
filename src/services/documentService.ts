@@ -936,56 +936,58 @@ export const documentService = {
   queueDocument,
   
   // Get a document by ID
-  async getDocumentById(documentId: string): Promise<MedicalDocument | null> {
-    const patients = await patientService.getPatients()
-    for (const patient of patients) {
-      const foundDocument = patient.fileSet.find(file => file.clientFileId === documentId)
-      
-      // Only log the critical info, not the entire document and patient
-      if (foundDocument) {
-        // console.log(`[DOCUMENT SERVICE] Found document ${documentId}:`, {
-        //   clientFileId: foundDocument.clientFileId,
-        //   status: foundDocument.status,
-        //   category: foundDocument.category,
-        //   silknotePatientUuid: patient.silknotePatientUuid
-        // });
-        
-        return foundDocument;
+  async getDocumentById(documentId: string, silknotePatientUuid?: string, silknoteUserUuid?: string): Promise<MedicalDocument | null> {
+    const decodedDocumentId = decodeURIComponent(documentId);
+    logger.info(`[DOCUMENT SERVICE] Fetching document via storageService with clientFileId: ${decodedDocumentId}, patientUuid: ${silknotePatientUuid}, userUuid: ${silknoteUserUuid}`);
+
+    // Optionally, verify user has access to the patient if silknoteUserUuid is provided
+    if (silknotePatientUuid && silknoteUserUuid) {
+      const patient = await patientService.getPatientById(silknotePatientUuid);
+      if (!patient || patient.silknoteUserUuid !== silknoteUserUuid) {
+        logger.warn(`[DOCUMENT SERVICE] User ${silknoteUserUuid} does not have access to patient ${silknotePatientUuid} or patient not found.`);
+        return null; // Or throw an authorization error
       }
     }
-    
-   // console.log(`[DOCUMENT SERVICE] Document not found: ${documentId}`);
-    return null;
+
+    // Delegate directly to storageService.getDocument,
+    // The storageService.getDocument will now also need to accept silknotePatientUuid
+    // TEMPORARY: Call with one arg until storageService is updated
+    const document = await storageService.getDocument(decodedDocumentId /*, silknotePatientUuid */);
+
+    if (document) {
+      // If silknotePatientUuid was provided for the lookup, ensure the found document actually belongs to that patient.
+      // This is a double check, primary check should be in the DB query via storageService.
+      if (silknotePatientUuid && document.silknotePatientUuid !== silknotePatientUuid) {
+        logger.warn(`[DOCUMENT SERVICE] Document ${decodedDocumentId} found, but does not belong to patient ${silknotePatientUuid}. Belongs to: ${document.silknotePatientUuid}`);
+        return null;
+      }
+      logger.info(`[DOCUMENT SERVICE] Found document for clientFileId ${decodedDocumentId} via storageService.`);
+      return document; 
+    } else {
+      logger.warn(`[DOCUMENT SERVICE] Document not found for clientFileId ${decodedDocumentId} via storageService.`);
+      return null;
+    }
   },
   
   // Get complete document content
-  async getDocumentContent(documentId: string): Promise<any> {
+  async getDocumentContent(documentId: string, silknotePatientUuid?: string, silknoteUserUuid?: string): Promise<any> {
     try {
-      // console.log(`[DOCUMENT SERVICE] Getting content for document: ${documentId}`);
-      
-      // Get from storage service instead of directly reading file
-      const document = await storageService.getDocument(documentId);
+      // Pass through the optional UUIDs for authorization and specific lookup
+      const document = await this.getDocumentById(decodeURIComponent(documentId), silknotePatientUuid, silknoteUserUuid);
       if (document && document.content) {
         return document.content;
       }
-      
-      // console.log(`[DOCUMENT SERVICE] No content found for document: ${documentId}`);
       return null;
     } catch (error) {
-      // console.log(`[DOCUMENT SERVICE] Error reading document content:`, error);
+      logger.error(`[DOCUMENT SERVICE] Error reading document content for ${documentId}:`, error);
       return null;
     }
   },
   
   // Update an existing document
   async updateDocument(document: MedicalDocument): Promise<boolean> {
-    try {
-      await storageService.updateDocument(document);
-      return true;
-    } catch (error) {
-      logger.error(`Error updating document ${document.clientFileId}:`, error);
-      return false;
-    }
+    // Update operations should also ensure the user has rights, typically handled at route/controller level before service call
+    return storageService.updateDocument(document);
   }
 };
 
