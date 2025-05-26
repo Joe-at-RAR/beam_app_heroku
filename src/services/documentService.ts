@@ -581,7 +581,7 @@ async function processDocument(input: QueuedDocument): Promise<void> {
               await processDocumentsForVectorStore(
                 [vectorStoreFile], 
                 patientContext.silknotePatientUuid,
-                patientContext.silknoteUserUuid || 'default-user'
+                patientContext.silknoteUserUuid
               );
             } finally {
               // Clear vector buffer
@@ -639,7 +639,7 @@ async function processDocument(input: QueuedDocument): Promise<void> {
           await patientService.updateFileForPatient(
             patientContext.silknotePatientUuid, 
             completeDoc, 
-            patientContext.silknoteUserUuid || 'default-user'
+            patientContext.silknoteUserUuid
           );
           Object.assign(partialDoc, completeDoc);
           break;
@@ -706,7 +706,7 @@ async function processDocument(input: QueuedDocument): Promise<void> {
         await patientService.updateFileForPatient(
           patientContext.silknotePatientUuid, 
           errorDocument, 
-          patientContext.silknoteUserUuid || 'default-user'
+          patientContext.silknoteUserUuid
         );
         
         // Emit the error status
@@ -949,8 +949,14 @@ export const documentService = {
     const decodedDocumentId = decodeURIComponent(documentId);
     logger.info(`[DOCUMENT SERVICE] Fetching document via storageService with clientFileId: ${decodedDocumentId}, patientUuid: ${silknotePatientUuid}, userUuid: ${silknoteUserUuid}`);
 
-    // Optionally, verify user has access to the patient if silknoteUserUuid is provided
-    if (silknotePatientUuid && silknoteUserUuid) {
+    // Require silknoteUserUuid
+    if (!silknoteUserUuid) {
+      logger.error(`[DOCUMENT SERVICE] silknoteUserUuid is required for getDocumentById`);
+      return null;
+    }
+
+    // Optionally, verify user has access to the patient if silknotePatientUuid is provided
+    if (silknotePatientUuid) {
       const patient = await patientService.getPatientById(silknotePatientUuid, silknoteUserUuid);
       if (!patient || patient.silknoteUserUuid !== silknoteUserUuid) {
         logger.warn(`[DOCUMENT SERVICE] User ${silknoteUserUuid} does not have access to patient ${silknotePatientUuid} or patient not found.`);
@@ -960,7 +966,7 @@ export const documentService = {
 
     // Use the new 3-parameter signature for storageService.getDocument
     const document = await storageService.getDocument(
-      silknoteUserUuid || 'default-user', 
+      silknoteUserUuid, 
       silknotePatientUuid || '', 
       decodedDocumentId
     );
@@ -996,10 +1002,15 @@ export const documentService = {
   },
   
   // Update an existing document
-  async updateDocument(document: MedicalDocument, silknoteUserUuid?: string): Promise<boolean> {
+  async updateDocument(document: MedicalDocument, silknoteUserUuid: string): Promise<boolean> {
+    // Require silknoteUserUuid
+    if (!silknoteUserUuid) {
+      throw new Error('silknoteUserUuid is required for updateDocument');
+    }
+    
     // Update operations should also ensure the user has rights, typically handled at route/controller level before service call
     return storageService.updateDocument(
-      silknoteUserUuid || 'default-user',
+      silknoteUserUuid,
       document.silknotePatientUuid,
       document
     );

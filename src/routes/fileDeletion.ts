@@ -2,14 +2,15 @@ import express from 'express';
 import { deleteFileFromPatient } from '../services/patientService';
 import { deleteFile } from '../services/fileService';
 import { io } from '../socket';
+import { getUserUuid } from '../middleware/auth';
 
 const router: express.Router = express.Router();
 
 router.delete('/:silknotePatientUuid/files/:fileId', async (req, res) => {
   const { silknotePatientUuid, fileId } = req.params;
   try {
-    // Add placeholder userUuid - in production this should come from auth headers
-    const silknoteUserUuid = req.headers['x-user-id'] as string || 'default-user';
+    // Get user UUID from auth middleware
+    const silknoteUserUuid = getUserUuid(req);
     
     // Delete the physical file and thumbnails
     await deleteFile(fileId);

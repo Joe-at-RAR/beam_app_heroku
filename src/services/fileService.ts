@@ -36,13 +36,20 @@ interface FormidableFile {
   size: number;
 }
 
+// Interface for queued files with user context
+interface QueuedFile {
+  fileId: string;
+  silknoteUserUuid: string;
+  silknotePatientUuid: string;
+}
+
 export class FileProcessor {
   private static instance: FileProcessor;
-  private processingQueue: string[] = [];
+  private processingQueue: QueuedFile[] = [];
   private isProcessing: boolean = false;
   private processingInterval: NodeJS.Timeout | null = null;
-  // private _isProcessingQueue = false;
-  // private _fileProcessTimeout: NodeJS.Timeout | null = null;
+  // Map to track queued files by fileId for quick lookup
+  private queuedFilesMap: Map<string, QueuedFile> = new Map();
 
   private constructor() {}
 
@@ -58,19 +65,16 @@ export class FileProcessor {
     this.processingInterval = setInterval(this.processQueuedFile, 5000);
   }
 
-  processQueuedFiles = async (patient: PatientDetails) => {
+  processQueuedFiles = async (patient: PatientDetails, silknoteUserUuid: string) => {
     const timestamp = new Date().toISOString();
     const unprocessedFiles = patient.fileSet.filter((file: MedicalDocument) => 
       file.status === 'unprocessed' && file.category === DocumentType.UNPROCESSED);
     
     console.log(`[${timestamp}] [FILE PROCESSOR] Found ${unprocessedFiles.length} unprocessed files for patient ${patient.silknotePatientUuid}`);
     
-    // Queue each unprocessed file
+    // Queue each unprocessed file with user context
     for (const file of unprocessedFiles) {
-      if (!this.processingQueue.includes(file.clientFileId)) {
-        this.processingQueue.push(file.clientFileId);
-        console.log(`[${timestamp}] [FILE PROCESSOR] Added file ${file.clientFileId} to processing queue`);
-      }
+      this.addToQueue(file.clientFileId, silknoteUserUuid, patient.silknotePatientUuid);
     }
   }
 
@@ -78,48 +82,41 @@ export class FileProcessor {
   processQueuedFile = async () => {
     if (this.isProcessing || this.processingQueue.length === 0) return;
       
-    // Store fileId at this scope so it's available in catch/finally blocks
-    const fileId = this.processingQueue[0];
+    // Get the first queued file with its context
+    const queuedFile = this.processingQueue[0];
     
     try {
       this.isProcessing = true;
-      console.log(`[${new Date().toISOString()}] [FILE PROCESSOR] Starting to process file: ${fileId}`);
+      console.log(`[${new Date().toISOString()}] [FILE PROCESSOR] Starting to process file: ${queuedFile.fileId} for user: ${queuedFile.silknoteUserUuid}`);
 
-      // Step 1: Find all patients - use default user for queue processing
-      const patients = await patientService.getPatients('default-user');
-      let targetPatient = null;
-      let file = null;
-
-      // Find the patient with the file
-      for (const patient of patients) {
-        if (!patient.fileSet) continue;
-        const matchingFile = patient.fileSet.find((f: MedicalDocument) => f.clientFileId === fileId);
-        if (matchingFile) {
-          targetPatient = patient;
-          file = matchingFile;
-          break;
-        }
+      // Get the patient directly using the stored context
+      const patient = await patientService.getPatientById(queuedFile.silknotePatientUuid, queuedFile.silknoteUserUuid);
+      if (!patient) {
+        throw new Error(`Patient ${queuedFile.silknotePatientUuid} not found for user ${queuedFile.silknoteUserUuid}`);
       }
 
-      if (!targetPatient || !file) {
-        throw new Error('File or patient not found');
+      // Find the file in the patient's fileSet
+      const file = patient.fileSet.find((f: MedicalDocument) => f.clientFileId === queuedFile.fileId);
+      if (!file) {
+        throw new Error(`File ${queuedFile.fileId} not found in patient ${queuedFile.silknotePatientUuid}`);
       }
 
       // Update status to queued
-      console.log(`[${new Date().toISOString()}] [FILE PROCESSOR] Updating file ${fileId} status to queued`);
+      console.log(`[${new Date().toISOString()}] [FILE PROCESSOR] Updating file ${queuedFile.fileId} status to queued`);
       file.status = 'queued';
-      await patientService.updatePatient(targetPatient);
+      await patientService.updatePatient(patient);
 
-      // Process the file
-      await processUnprocessedFiles(targetPatient.silknotePatientUuid);
+      // Process the file with user context
+      await processUnprocessedFiles(queuedFile.silknotePatientUuid, queuedFile.silknoteUserUuid);
 
     } catch (error) {
-      console.log(`[${new Date().toISOString()}] [FILE PROCESSOR] Error processing file ${fileId}:`, error);
+      console.log(`[${new Date().toISOString()}] [FILE PROCESSOR] Error processing file ${queuedFile.fileId}:`, error);
     } finally {
-      // Remove from queue regardless of success/failure
+      // Remove from queue and map
       this.processingQueue.shift();
+      this.queuedFilesMap.delete(queuedFile.fileId);
       this.isProcessing = false;
-      console.log(`[${new Date().toISOString()}] [FILE PROCESSOR] Completed processing file: ${fileId}`);
+      console.log(`[${new Date().toISOString()}] [FILE PROCESSOR] Completed processing file: ${queuedFile.fileId}`);
       
       // Check if there are more files to process
       if (this.processingQueue.length > 0) {
@@ -129,11 +126,22 @@ export class FileProcessor {
     }
   }
 
-  public addToQueue(fileId: string) {
-    if (!this.processingQueue.includes(fileId)) {
-      this.processingQueue.push(fileId);
-      console.log(`[${new Date().toISOString()}] [FILE PROCESSOR] Added file ${fileId} to processing queue`);
+  public addToQueue(fileId: string, silknoteUserUuid: string, silknotePatientUuid: string) {
+    // Check if file is already queued
+    if (this.queuedFilesMap.has(fileId)) {
+      console.log(`[${new Date().toISOString()}] [FILE PROCESSOR] File ${fileId} already in queue`);
+      return;
     }
+    
+    const queuedFile: QueuedFile = {
+      fileId,
+      silknoteUserUuid,
+      silknotePatientUuid
+    };
+    
+    this.processingQueue.push(queuedFile);
+    this.queuedFilesMap.set(fileId, queuedFile);
+    console.log(`[${new Date().toISOString()}] [FILE PROCESSOR] Added file ${fileId} to processing queue for user ${silknoteUserUuid}`);
   }
 
   public stop() {
@@ -142,14 +150,6 @@ export class FileProcessor {
       console.log(`[${new Date().toISOString()}] [FILE PROCESSOR] Stopped monitoring for unprocessed files`);
     }
   }
-
-  // private async checkForUnprocessedFiles() { // Unused
-  //   // ... logic ...
-  // }
-
-  // private async processNextFile() { // Unused
-  //   // ... logic ...
-  // }
 }
 
 // Initialize the singleton
@@ -158,7 +158,7 @@ const fileProcessor = FileProcessor.getInstance();
 // In-memory file store for demonstration purposes
 const fileDB: Map<string, any> = new Map();
 
-export function createFileMetadata(silknotePatientUuid: string, file: UploadedFile): ProcessingFile {
+export function createFileMetadata(silknotePatientUuid: string, file: UploadedFile, silknoteUserUuid: string): ProcessingFile {
   const fileId = crypto.randomUUID();
   
   // Handle different property naming conventions between Formidable and Multer
@@ -208,17 +208,18 @@ export function createFileMetadata(silknotePatientUuid: string, file: UploadedFi
 
   fileDB.set(fileId, metadata);
   console.log(`[${new Date().toISOString()}] [FILE SERVICE] Created file metadata for ${fileId}`);
-  fileProcessor.addToQueue(fileId);
+  // Add to queue with user context
+  fileProcessor.addToQueue(fileId, silknoteUserUuid, silknotePatientUuid);
   console.log(`[${new Date().toISOString()}] [FILE SERVICE] Added file ${fileId} to processing queue`);
   return metadata;
 }
 
-export async function processUnprocessedFiles(silknotePatientUuid: string) {
+export async function processUnprocessedFiles(silknotePatientUuid: string, silknoteUserUuid: string) {
   try {
-    // Use default user for processing context
-    const patient = await patientService.getPatientById(silknotePatientUuid, 'default-user');
+    // Use the provided user context
+    const patient = await patientService.getPatientById(silknotePatientUuid, silknoteUserUuid);
     if (!patient) {
-      console.log(`No patient found with ID ${silknotePatientUuid}`);
+      console.log(`No patient found with ID ${silknotePatientUuid} for user ${silknoteUserUuid}`);
       return;
     }
 
@@ -233,9 +234,9 @@ export async function processUnprocessedFiles(silknotePatientUuid: string) {
     console.log(`Found ${unprocessedFiles.length} unprocessed files for patient ${silknotePatientUuid}`);
     emitProcessingStart(silknotePatientUuid, unprocessedFiles.map(f => f.clientFileId));
     
-    // Add files to the queue for processing
+    // Add files to the queue for processing with user context
     for (const file of unprocessedFiles) {
-      FileProcessor.getInstance().addToQueue(file.clientFileId);
+      FileProcessor.getInstance().addToQueue(file.clientFileId, silknoteUserUuid, silknotePatientUuid);
     }
   } catch (error) {
     console.log(`Error processing files for patient ${silknotePatientUuid}:`, error);

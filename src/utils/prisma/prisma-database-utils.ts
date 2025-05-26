@@ -709,7 +709,7 @@ export function createPrismaAdapter(): DatabaseAdapter {
                     logger.warn(`[PRISMA] updateDocument: Doc ${docUuid} (client: ${document.clientFileId}) not found or not owned.`);
                     return false;
                 }
-                
+
                 const documentDataToUpdate: Omit<Prisma.SilknoteDocumentUpdateInput, 'patientFileset' | 'patientUuid'> = {
                     clientFileId: document.clientFileId,
                     originalName: document.originalName,

@@ -28,6 +28,7 @@ import documentReprocessRouter from './routes/document-reprocess';
 import vectorSearchRouter from './routes/vectorSearch';
 import documentAlertsRouter from './routes/documentAlerts';
 import { getPatientById } from './services/patientService';
+import { requireAuth } from './middleware/auth';
 
 ////////////////////////////////////////////////////////////////
 // Express App Configuration
@@ -233,7 +234,34 @@ app.get('/', (_req: Request, res: Response) => {
   res.json({ status: 'ok', message: 'API root - use /api/* or /health' })
 })
 
-// API endpoints
+// Health check endpoint (no auth required)
+app.get('/health', (_req: Request, res: Response) => {
+  res.json({ status: 'ok' });
+});
+
+// Apply authentication middleware to all /api routes EXCEPT administrative endpoints
+app.use('/api', (req: Request, res: Response, next: NextFunction) => {
+  // List of endpoints that don't require authentication
+  const publicEndpoints = [
+    '/api/documents/reprocess', // Administrative endpoint
+    '/api/users' // User registration
+  ];
+  
+  // Check if the current path is a public endpoint
+  const isPublicEndpoint = publicEndpoints.some(endpoint => 
+    req.path === endpoint || req.path.startsWith(endpoint + '/')
+  );
+  
+  if (isPublicEndpoint) {
+    // Skip authentication for public endpoints
+    return next();
+  }
+  
+  // Apply authentication for all other endpoints
+  return requireAuth(req, res, next);
+});
+
+// API endpoints (authentication applied selectively above)
 app.use('/api/query', queryRouter);
 app.use('/api/patients', patientRoutes);
 app.use('/api/users', userRoutes);
@@ -243,18 +271,12 @@ app.use('/api/documents', documentReprocessRouter); // Add reprocess endpoint
 app.use('/api/vector-search', vectorSearchRouter);
 app.use('/api/alerts', documentAlertsRouter);
 
-// Health check endpoint
-app.get('/health', (_req: Request, res: Response) => {
-  res.json({ status: 'ok' });
-});
-
 app.get('/api/patients/:silknotePatientUuid', async (req, res) => {
   const { silknotePatientUuid } = req.params;
   
   try {
-    // Note: In a real implementation, we'd extract silknoteUserUuid from auth headers/JWT
-    // For now, using a placeholder - this should be replaced with proper auth
-    const silknoteUserUuid = req.headers['x-user-id'] as string || 'default-user';
+    // Extract silknoteUserUuid from authenticated user
+    const silknoteUserUuid = req.user!.id; // We know user exists because of requireAuth middleware
     
     const patient = await getPatientById(silknotePatientUuid, silknoteUserUuid);
     

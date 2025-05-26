@@ -5,6 +5,7 @@ import { AzureOpenAI } from 'openai'
 import config from '../config'
 import * as patientService from '../services/patientService'
 import { findEnhancedPrompt } from '../shared/query-mappings'
+import { getUserUuid } from '../middleware/auth'
 
 const router: Router = Router()
 
@@ -35,8 +36,8 @@ router.post('/:silknotePatientUuid/query', async (req, res) => {
       return res.status(400).json({ error: 'Missing required parameters' })
     }
 
-    // Add placeholder userUuid - in production this should come from auth headers
-    const silknoteUserUuid = req.headers['x-user-id'] as string || 'default-user';
+    // Get user UUID from auth middleware
+    const silknoteUserUuid = getUserUuid(req);
 
     const patient = await patientService.getPatientById(silknotePatientUuid, silknoteUserUuid)
     if (!patient?.vectorStore?.assistantId) {
@@ -81,8 +82,8 @@ router.post('/:silknotePatientUuid/clear', async (req, res) => {
   try {
     const { silknotePatientUuid } = req.params
 
-    // Add placeholder userUuid - in production this should come from auth headers
-    const silknoteUserUuid = req.headers['x-user-id'] as string || 'default-user';
+    // Get user UUID from auth middleware
+    const silknoteUserUuid = getUserUuid(req);
 
     const patient = await patientService.getPatientById(silknotePatientUuid, silknoteUserUuid)
     if (!patient) {
@@ -309,8 +310,8 @@ router.post('/:silknotePatientUuid/query-full', async (req, res) => {
       return res.status(400).json({ error: 'Missing required parameters (patient UUID and query)' });
     }
 
-    // Add placeholder userUuid - in production this should come from auth headers
-    const silknoteUserUuid = req.headers['x-user-id'] as string || 'default-user';
+    // Get user UUID from auth middleware
+    const silknoteUserUuid = getUserUuid(req);
 
     // Determine the actual prompt to use
     const userQuery = query.toString();

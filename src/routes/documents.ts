@@ -6,149 +6,243 @@ import { storageService } from "../utils/storage";
 import { asyncHandler } from "../utils/errorHandlers";
 import { createLogger } from '../utils/logger';
 import config from '../config';
+import { getUserUuid } from '../middleware/auth';
 
 const logger = createLogger('DOCUMENTS_ROUTE')
 const router:Router = Router()
 
-// Get detailed document information including extraction data - THIS MUST COME FIRST
-router.get('/:id/details', async (req, res) => {
-  try {
-    const { id } = req.params;
-    
-    // Decode the ID to correctly handle spaces and other encoded characters
-    const decodedId = decodeURIComponent(id);
-    console.log(`[DOCUMENTS ROUTES] Fetching document details: ${decodedId}`);
-    
-    // Validate the document ID
-    if (!decodedId) {
-      return res.status(400).json({ error: 'Document ID is required' });
-    }
-    
-    // Retrieve the basic document metadata
-    const documentBasic = await documentService.getDocumentById(decodedId);
-    
-    if (!documentBasic) {
-      console.log('Document not found for details view:', decodedId);
-      return res.status(404).json({ error: 'Document not found' });
-    }
-    
-    // Load the full content from patients.json
-    const content = await documentService.getDocumentContent(decodedId);
-    
-    // Log content details for debugging
-    if (!content) {
-      console.log(`No content found for document: ${decodedId}`);
-    } else {
-      console.log(`Found content for document: ${decodedId}`);
-      console.log(`Has analysis result: ${Boolean(content.analysisResult)}`);
-      console.log(`Extracted schemas: ${content.extractedSchemas?.length || 0}`);
-      console.log(`Enriched schemas: ${content.enrichedSchemas?.length || 0}`);
-    }
-    
-    // If we found the content in patients.json, use it
-    // Otherwise, keep what's in the basic document
-    const fullDocument = {
-      ...documentBasic,
-      content: content || documentBasic.content
-    };
-    
-    return res.json(fullDocument);
-  } catch (error) {
-    console.log('Error fetching document details:', error);
-    return res.status(500).json({ error: 'Failed to retrieve document details' });
+// Helper function to extract and validate patient UUID from headers
+function getPatientUuid(req: Request): string | null {
+  const patientUuid = req.headers['x-silknote-patient-uuid'] as string;
+  if (!patientUuid) {
+    return null;
   }
-});
+  
+  // Validate UUID format
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(patientUuid)) {
+    return null;
+  }
+  
+  return patientUuid;
+}
+
+// Get detailed document information including extraction data - THIS MUST COME FIRST
+router.get('/:id/details', asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  
+  // Decode the ID to correctly handle spaces and other encoded characters
+  const decodedId = decodeURIComponent(id);
+  logger.info(`Fetching document details: ${decodedId}`);
+  
+  // Validate the document ID
+  if (!decodedId) {
+    return res.status(400).json({ error: 'Document ID is required' });
+  }
+  
+  // Get user UUID from auth middleware
+  const userUuid = getUserUuid(req);
+  
+  // Get patient UUID from header
+  const patientUuid = getPatientUuid(req);
+  if (!patientUuid) {
+    return res.status(400).json({ 
+      error: 'Missing or invalid x-silknote-patient-uuid header',
+      message: 'Patient UUID must be provided in x-silknote-patient-uuid header' 
+    });
+  }
+  
+  // Retrieve the document with access validation
+  const documentBasic = await documentService.getDocumentById(decodedId, patientUuid, userUuid);
+  
+  if (!documentBasic) {
+    logger.warn(`Document not found or access denied: ${decodedId} for user ${userUuid} and patient ${patientUuid}`);
+    return res.status(404).json({ error: 'Document not found' });
+  }
+  
+  // Validate that the document belongs to the specified patient
+  if (documentBasic.silknotePatientUuid !== patientUuid) {
+    logger.warn(`Access denied: Document ${decodedId} belongs to patient ${documentBasic.silknotePatientUuid}, not ${patientUuid}`);
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  
+  // Load the full content
+  const content = await documentService.getDocumentContent(decodedId, patientUuid, userUuid);
+  
+  // Log content details for debugging
+  if (!content) {
+    logger.debug(`No content found for document: ${decodedId}`);
+  } else {
+    logger.debug(`Found content for document: ${decodedId}`, {
+      hasAnalysisResult: Boolean(content.analysisResult),
+      extractedSchemas: content.extractedSchemas?.length || 0,
+      enrichedSchemas: content.enrichedSchemas?.length || 0
+    });
+  }
+  
+  // If we found the content, use it
+  // Otherwise, keep what's in the basic document
+  const fullDocument = {
+    ...documentBasic,
+    content: content || documentBasic.content
+  };
+  
+  return res.json(fullDocument);
+}));
 
 // Regular document route - COMES AFTER the details route
-router.get('/:documentId', async (req, res) => {
-    console.log(`[DOCUMENTS ROUTES] Fetching document: ${req.params.documentId}`)
-  const { documentId } = req.params
-  const decodedDocumentId = decodeURIComponent(documentId)
+router.get('/:documentId', asyncHandler(async (req: Request, res: Response) => {
+  const { documentId } = req.params;
+  const decodedDocumentId = decodeURIComponent(documentId);
   
-  const documentRecord = await documentService.getDocumentById(decodedDocumentId)
-  if (!documentRecord) {
-    console.log('Document not found for id:', decodedDocumentId)
-    return res.status(404).send('Document not found')
+  logger.info(`Fetching document: ${decodedDocumentId}`);
+  
+  // Get user UUID from auth middleware
+  const userUuid = getUserUuid(req);
+  
+  // Get patient UUID from header
+  const patientUuid = getPatientUuid(req);
+  if (!patientUuid) {
+    return res.status(400).json({ 
+      error: 'Missing or invalid x-silknote-patient-uuid header',
+      message: 'Patient UUID must be provided in x-silknote-patient-uuid header' 
+    });
   }
   
-  const filePath = documentRecord.storedPath
+  // Get document with access validation
+  const documentRecord = await documentService.getDocumentById(decodedDocumentId, patientUuid, userUuid);
+  if (!documentRecord) {
+    logger.warn(`Document not found or access denied: ${decodedDocumentId} for user ${userUuid} and patient ${patientUuid}`);
+    return res.status(404).send('Document not found');
+  }
+  
+  // Validate that the document belongs to the specified patient
+  if (documentRecord.silknotePatientUuid !== patientUuid) {
+    logger.warn(`Access denied: Document ${decodedDocumentId} belongs to patient ${documentRecord.silknotePatientUuid}, not ${patientUuid}`);
+    return res.status(403).send('Access denied');
+  }
+  
+  const filePath = documentRecord.storedPath;
+  
   // --- If we are in SILKNOTE (Azure Blob) mode ---
   if (config.storage.type !== 'LOCAL') {
     try {
       const buffer = await storageService.getFileContent(filePath);
-      res.setHeader('Content-Type', 'application/pdf')
-      res.setHeader('Content-Disposition', `inline; filename="${documentRecord.originalName || path.basename(filePath)}"`)
-      return res.end(buffer)
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="${documentRecord.originalName || path.basename(filePath)}"`);
+      return res.end(buffer);
     } catch (err) {
-      console.log('Error retrieving blob for path:', filePath, err)
-      return res.status(404).send('Stored file not found in blob storage')
+      logger.error('Error retrieving blob for path:', { filePath, error: err });
+      return res.status(404).send('Stored file not found in blob storage');
     }
   }
+  
   // --- LOCAL (VSRX) mode ---
   if (!filePath || !fs.existsSync(filePath)) {
-    console.log('Stored file not found at:', filePath)
-    return res.status(404).send('Stored file not found')
+    logger.error('Stored file not found at:', filePath);
+    return res.status(404).send('Stored file not found');
   }
   
   try {
-    const stat = fs.statSync(filePath)
-    console.log(`Streaming file [${path.basename(filePath)}] with size ${stat.size} bytes`)
+    const stat = fs.statSync(filePath);
+    logger.debug(`Streaming file [${path.basename(filePath)}] with size ${stat.size} bytes`);
   } catch (err) {
-    console.log('Error accessing file stats for path:', filePath, err)
+    logger.error('Error accessing file stats for path:', { filePath, error: err });
     return res.status(500).send('Error accessing file information');
   }
   
-  res.setHeader('Content-Type', 'application/pdf')
-  res.setHeader('Content-Disposition', `inline; filename="${path.basename(filePath)}"`)
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="${path.basename(filePath)}"`);
   
-  const stream = fs.createReadStream(filePath)
+  const stream = fs.createReadStream(filePath);
   stream.on('error', (err) => {
-    console.log('Error streaming file:', filePath, err)
+    logger.error('Error streaming file:', { filePath, error: err });
     if (!res.headersSent) {
-        res.status(500).send('Error streaming file');
+      res.status(500).send('Error streaming file');
     }
-  })
+  });
   stream.pipe(res);
   return;
-})
+}));
 
 // DELETE /:documentId - Delete a document reference
 router.delete('/:documentId', asyncHandler(async (req: Request, res: Response) => {
-    const { documentId } = req.params;
-    logger.info(`Received request to delete document ${documentId}`);
+  const { documentId } = req.params;
+  logger.info(`Received request to delete document ${documentId}`);
+  
+  // Get user UUID from auth middleware
+  const userUuid = getUserUuid(req);
+  
+  // Get patient UUID from header
+  const patientUuid = getPatientUuid(req);
+  if (!patientUuid) {
+    return res.status(400).json({ 
+      error: 'Missing or invalid x-silknote-patient-uuid header',
+      message: 'Patient UUID must be provided in x-silknote-patient-uuid header' 
+    });
+  }
+  
+  // First validate access by getting the document
+  const documentRecord = await documentService.getDocumentById(documentId, patientUuid, userUuid);
+  if (!documentRecord) {
+    logger.warn(`Document ${documentId} not found or access denied for user ${userUuid} and patient ${patientUuid}`);
+    return res.status(404).json({ error: 'Document not found.' });
+  }
+  
+  // Validate that the document belongs to the specified patient
+  if (documentRecord.silknotePatientUuid !== patientUuid) {
+    logger.warn(`Access denied: Document ${documentId} belongs to patient ${documentRecord.silknotePatientUuid}, not ${patientUuid}`);
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  
+  // Now proceed with deletion
+  const success = await storageService.deleteDocument(userUuid, patientUuid, documentId);
+  if (success) {
+    logger.info(`Successfully deleted document reference ${documentId}`);
+    // Use 204 No Content for successful deletion with no body
+    return res.status(204).send();
+  } else {
+    // This could mean document not found or DB error
+    logger.warn(`Failed to delete document reference ${documentId} (DB error)`);
+    return res.status(500).json({ error: 'Failed to delete document.' });
+  }
+}));
 
-    try {
-        // Add placeholder userUuid - in production this should come from auth headers
-        const userUuid = req.headers['x-user-id'] as string || 'default-user';
-        
-        // First get the document to find its patient UUID
-        const documentRecord = await documentService.getDocumentById(documentId);
-        if (!documentRecord) {
-            logger.warn(`Document ${documentId} not found for deletion`);
-            return res.status(404).json({ error: 'Document not found.' });
-        }
-        
-        // Get patient UUID from the document record
-        const patientUuid = documentRecord.silknotePatientUuid;
-        if (!patientUuid) {
-            logger.error(`Document ${documentId} has no patient UUID associated`);
-            return res.status(400).json({ error: 'Document has no patient association.' });
-        }
-        
-        const success = await storageService.deleteDocument(userUuid, patientUuid, documentId);
-        if (success) {
-            logger.info(`Successfully deleted document reference ${documentId}`);
-            // Use 204 No Content for successful deletion with no body
-            return res.status(204).send(); 
-        } else {
-            // This could mean document not found or DB error
-            logger.warn(`Failed to delete document reference ${documentId} (not found or DB error)`);
-            return res.status(404).json({ error: 'Document not found or could not be deleted.' });
-        }
-    } catch (error) {
-        logger.error(`Error deleting document ${documentId}`, error as Error);
-        return res.status(500).json({ error: 'Internal server error during document deletion.' });
-    }
+// GET /:documentId/metadata - Get document metadata
+router.get('/:documentId/metadata', asyncHandler(async (req: Request, res: Response) => {
+  const { documentId } = req.params;
+  const decodedDocumentId = decodeURIComponent(documentId);
+  
+  logger.info(`Fetching document metadata: ${decodedDocumentId}`);
+  
+  // Get user UUID from auth middleware
+  const userUuid = getUserUuid(req);
+  
+  // Get patient UUID from header
+  const patientUuid = getPatientUuid(req);
+  if (!patientUuid) {
+    return res.status(400).json({ 
+      error: 'Missing or invalid x-silknote-patient-uuid header',
+      message: 'Patient UUID must be provided in x-silknote-patient-uuid header' 
+    });
+  }
+  
+  // Get document with access validation
+  const document = await documentService.getDocumentById(decodedDocumentId, patientUuid, userUuid);
+  if (!document) {
+    logger.warn(`Document not found or access denied: ${decodedDocumentId} for user ${userUuid} and patient ${patientUuid}`);
+    return res.status(404).json({ error: 'Document not found' });
+  }
+  
+  // Validate that the document belongs to the specified patient
+  if (document.silknotePatientUuid !== patientUuid) {
+    logger.warn(`Access denied: Document ${decodedDocumentId} belongs to patient ${document.silknotePatientUuid}, not ${patientUuid}`);
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  
+  // Return metadata without content
+  const { content, ...metadata } = document;
+  return res.json(metadata);
 }));
 
 export default router

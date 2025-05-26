@@ -11,6 +11,7 @@ import config from '../config';
 import { randomUUID } from "crypto";
 import { storageService } from "../utils/storage";
 import { io } from '../utils/io'; // Import the global io instance
+import { getUserUuid } from '../middleware/auth';
 // Ensure ServerToClientEvents and SharedCaseSummaryApiResponse are correctly typed/imported
 // For instance, if SharedCaseSummaryApiResponse is in ../shared/types:
 // import { SharedCaseSummaryApiResponse } from '../shared/types';
@@ -137,14 +138,11 @@ export async function queryAssistantWithCitationsObject(
   query: string,
   schema: any,
   embedCitationMarkers: boolean = false, // Flag to control marker embedding
-  silknoteUserUuid?: string // Add optional parameter for backwards compatibility
+  silknoteUserUuid: string // Now required parameter
 ): Promise<{ content: any; citations: SummaryCitation[] }> {
   logger.info(`[VECTOR STORE - QAC_OBJ] START Patient: ${silknotePatientUuid}, Query: ${query.substring(0, 50)}..., EmbedMarkers: ${embedCitationMarkers}`);
 
-  // Use a default user if not provided (for backwards compatibility)
-  const userUuid = silknoteUserUuid || 'default-user';
-  
-  const patient = await patientService.getPatientById(silknotePatientUuid, userUuid);
+  const patient = await patientService.getPatientById(silknotePatientUuid, silknoteUserUuid);
   if (!patient?.vectorStore?.assistantId) {
       const errorMsg = !patient ? `Patient with ID ${silknotePatientUuid} not found.` : 'No vector store or assistant configured for this patient.';
       logger.error(`[VECTOR STORE - QAC_OBJ] Error: ${errorMsg}`);
@@ -233,7 +231,7 @@ export async function queryAssistantWithCitationsObject(
                               const clientFileId = mapping?.clientFileId || openAIFilename.split('.')[0];
                               const matchedDocName = mapping?.fileName || openAIFilename;
                               let pageNumber = 1;
-                              const medicalDocument = await storageService.getDocument(userUuid, silknotePatientUuid, clientFileId);
+                              const medicalDocument = await storageService.getDocument(silknoteUserUuid, silknotePatientUuid, clientFileId);
                               if (medicalDocument?.content?.analysisResult?.pages?.length) {
                                   for (const page of medicalDocument.content.analysisResult.pages) {
                                       if (page.spans?.length) {
@@ -517,13 +515,13 @@ export async function queryAssistantWithCitationsObject(
 
 router.get('/generate/:silknotePatientUuid', asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   const { silknotePatientUuid } = req.params;
-  const requesterId = (req as any).user?.id || 'unknown_requester'; 
+  const requesterId = req.user?.id || 'unknown_requester'; 
   
   logger.info(`[CASE SUMMARY] Received request to generate summary for patient: ${silknotePatientUuid} by ${requesterId}`);
   
   try {
-    // Extract silknoteUserUuid from request (should be from auth headers in production)
-    const silknoteUserUuid = req.headers['x-user-id'] as string || 'default-user';
+    // Extract silknoteUserUuid from authenticated user
+    const silknoteUserUuid = getUserUuid(req);
     
     const patient = await getPatientById(silknotePatientUuid, silknoteUserUuid);
     if (!patient) {
@@ -567,7 +565,7 @@ router.get('/generate/:silknotePatientUuid', asyncHandler(async (req: Request, r
   }
 }));
 
-async function generateAndNotify(silknotePatientUuid: string, requesterId: string, jobId: string, silknoteUserUuid?: string) {
+async function generateAndNotify(silknotePatientUuid: string, requesterId: string, jobId: string, silknoteUserUuid: string) {
   const patientRoom = `patient-${silknotePatientUuid}`;
   try {
     logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] Starting generation for patient: ${silknotePatientUuid}, room: ${patientRoom}, requester: ${requesterId}`);
@@ -579,8 +577,7 @@ async function generateAndNotify(silknotePatientUuid: string, requesterId: strin
       message: 'Processing documents and generating summary...'
     });
 
-    const userUuid = silknoteUserUuid || 'default-user';
-    const patient = await getPatientById(silknotePatientUuid, userUuid);
+    const patient = await getPatientById(silknotePatientUuid, silknoteUserUuid);
     if (!patient) {
         logger.error(`[CASE SUMMARY ASYNC JOB: ${jobId}] Patient ${silknotePatientUuid} not found during async processing.`);
         io.to(patientRoom).emit('caseSummaryError', {
@@ -591,7 +588,7 @@ async function generateAndNotify(silknotePatientUuid: string, requesterId: strin
         return;
     }
     
-    const { summary, citations } = await generateComprehensiveCaseSummary(silknotePatientUuid, userUuid);
+    const { summary, citations } = await generateComprehensiveCaseSummary(silknotePatientUuid, silknoteUserUuid);
     
     const newCount = (patient.summaryGenerationCount || 0) + 1;
     // Corrected type to CaseSummaryApiResponse
@@ -630,12 +627,12 @@ async function generateAndNotify(silknotePatientUuid: string, requesterId: strin
  * to maximize information extraction while preserving existing citation formats.
  * 
  * @param silknotePatientUuid - Patient ID to generate summary for
- * @param silknoteUserUuid - User ID (optional, defaults to 'default-user')
+ * @param silknoteUserUuid - User ID (required)
  * @returns Promise with complete, properly typed case summary including inconsistencies
  */
 export async function generateComprehensiveCaseSummary(
   silknotePatientUuid: string,
-  silknoteUserUuid?: string
+  silknoteUserUuid: string // Now required
 ): Promise<{ summary: CaseSummaryType; citations: SummaryCitation[] }> {
   const internalGenerate = async (): Promise<{ summary: CaseSummaryType; citations: SummaryCitation[] }> => {
     logger.info(`[VECTOR STORE - GEN_COMP_SUMMARY] START Patient: ${silknotePatientUuid}`);
@@ -644,8 +641,6 @@ export async function generateComprehensiveCaseSummary(
       
       // Initialize array to collect all citations
       let allCitations: SummaryCitation[] = [];
-      
-      const userUuid = silknoteUserUuid || 'default-user';
 
       // 1. Run all extraction steps concurrently
       const [
@@ -654,10 +649,10 @@ export async function generateComprehensiveCaseSummary(
         keyEventsTimelineResult,
         inconsistenciesResult
       ] = await Promise.all([
-        extractPatientInfo(silknotePatientUuid, true, userUuid), // Pass userUuid
-        extractDiagnosesAndTreatments(silknotePatientUuid, true, userUuid), // Pass userUuid
-        extractComprehensiveTimeline(silknotePatientUuid, true, userUuid), // Pass userUuid
-        generateInconsistenciesWithObject(silknotePatientUuid, userUuid) // Pass userUuid
+        extractPatientInfo(silknotePatientUuid, true, silknoteUserUuid),
+        extractDiagnosesAndTreatments(silknotePatientUuid, true, silknoteUserUuid),
+        extractComprehensiveTimeline(silknotePatientUuid, true, silknoteUserUuid),
+        generateInconsistenciesWithObject(silknotePatientUuid, silknoteUserUuid)
       ]);
 
       console.log(`[!!!!!!!!!!!!!!!VECTOR STORE - GEN_COMP_SUMMARY] Inconsistencies Result:`);
@@ -706,7 +701,7 @@ export async function generateComprehensiveCaseSummary(
         patientInfoResult,
         diagnosesAndTreatmentsResult,
         true, // Pass true
-        userUuid // Pass userUuid
+        silknoteUserUuid // Pass userUuid
       ).catch(error => {
         logger.error(`[VECTOR STORE - GEN_COMP_SUMMARY] Narrative generation failed: ${error instanceof Error ? error.message : String(error)}`);
         return { 
@@ -1030,7 +1025,7 @@ function ensureValidKeyEvents(keyEvents: any[]): any[] {
 async function extractComprehensiveTimeline(
   silknotePatientUuid: string,
   embedMarkers: boolean,
-  silknoteUserUuid?: string // Add optional userUuid parameter
+  silknoteUserUuid: string // Now required
 ): Promise<{ content: any; citations: SummaryCitation[] }> {
   const logTag = 'TIMELINE';
   logger.info(`[${logTag}] START extraction for patient: ${silknotePatientUuid}`);
@@ -1214,8 +1209,8 @@ async function generateNarrativeFromExtractedData(
   silknotePatientUuid: string,
   patientInfo: any,
   diagnosisInfo: any,
-  embedMarkers: boolean, // Pass flag
-  silknoteUserUuid?: string // Add optional userUuid parameter
+  embedMarkers: boolean,
+  silknoteUserUuid: string // Now required
 ): Promise<{ content: string; citations: SummaryCitation[] }> { // Return structure matches QAC_OBJ
   // Implement retries with exponential backoff
   let attempts = 0;
@@ -1370,8 +1365,8 @@ async function generateNarrativeFromExtractedData(
  */
 async function extractPatientInfo(
   silknotePatientUuid: string,
-  embedMarkers: boolean, // Add flag
-  silknoteUserUuid?: string // Add optional userUuid parameter
+  embedMarkers: boolean,
+  silknoteUserUuid: string // Now required
 ): Promise<{ content: any; citations: SummaryCitation[] }> {
   const patientInfoSchema = {
     patientName:        "String Patient's full name and citation",
@@ -1426,8 +1421,8 @@ async function extractPatientInfo(
  */
 async function extractDiagnosesAndTreatments(
   silknotePatientUuid: string,
-  embedMarkers: boolean, // Add flag
-  silknoteUserUuid?: string // Add optional userUuid parameter
+  embedMarkers: boolean,
+  silknoteUserUuid: string // Now required
 ): Promise<{ content: any; citations: SummaryCitation[] }> {
   const diagnosisSchema = {
       diagnoses: [{
@@ -1493,7 +1488,7 @@ async function extractDiagnosesAndTreatments(
  */
 export async function generateInconsistenciesWithObject(
   silknotePatientUuid: string,
-  silknoteUserUuid?: string // Add optional userUuid parameter
+  silknoteUserUuid: string // Now required parameter
 ): Promise<{
   content: {
     hasInconsistencies: boolean;
