@@ -35,7 +35,10 @@ router.post('/:silknotePatientUuid/query', async (req, res) => {
       return res.status(400).json({ error: 'Missing required parameters' })
     }
 
-    const patient = await patientService.getPatientById(silknotePatientUuid)
+    // Add placeholder userUuid - in production this should come from auth headers
+    const silknoteUserUuid = req.headers['x-user-id'] as string || 'default-user';
+
+    const patient = await patientService.getPatientById(silknotePatientUuid, silknoteUserUuid)
     if (!patient?.vectorStore?.assistantId) {
       return res.status(404).json({ error: 'No vector store found for patient' })
     }
@@ -78,7 +81,10 @@ router.post('/:silknotePatientUuid/clear', async (req, res) => {
   try {
     const { silknotePatientUuid } = req.params
 
-    const patient = await patientService.getPatientById(silknotePatientUuid)
+    // Add placeholder userUuid - in production this should come from auth headers
+    const silknoteUserUuid = req.headers['x-user-id'] as string || 'default-user';
+
+    const patient = await patientService.getPatientById(silknotePatientUuid, silknoteUserUuid)
     if (!patient) {
       return res.status(404).json({ error: 'Patient not found' })
     }
@@ -303,6 +309,9 @@ router.post('/:silknotePatientUuid/query-full', async (req, res) => {
       return res.status(400).json({ error: 'Missing required parameters (patient UUID and query)' });
     }
 
+    // Add placeholder userUuid - in production this should come from auth headers
+    const silknoteUserUuid = req.headers['x-user-id'] as string || 'default-user';
+
     // Determine the actual prompt to use
     const userQuery = query.toString();
     const effectivePrompt = actualPrompt 
@@ -313,6 +322,7 @@ router.post('/:silknotePatientUuid/query-full', async (req, res) => {
     const result = await patientService.getQueryResponse(
       silknotePatientUuid,
       effectivePrompt, // Use the potentially enhanced prompt
+      silknoteUserUuid, // Add the required userUuid parameter
       {
         includeExactQuotes: Boolean(includeExactQuotes),
         outputFormat: String(outputFormat || 'json') // Default to json for citations

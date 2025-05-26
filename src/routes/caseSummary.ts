@@ -136,11 +136,15 @@ export async function queryAssistantWithCitationsObject(
   silknotePatientUuid: string,
   query: string,
   schema: any,
-  embedCitationMarkers: boolean = false // Flag to control marker embedding
+  embedCitationMarkers: boolean = false, // Flag to control marker embedding
+  silknoteUserUuid?: string // Add optional parameter for backwards compatibility
 ): Promise<{ content: any; citations: SummaryCitation[] }> {
   logger.info(`[VECTOR STORE - QAC_OBJ] START Patient: ${silknotePatientUuid}, Query: ${query.substring(0, 50)}..., EmbedMarkers: ${embedCitationMarkers}`);
 
-  const patient = await patientService.getPatientById(silknotePatientUuid);
+  // Use a default user if not provided (for backwards compatibility)
+  const userUuid = silknoteUserUuid || 'default-user';
+  
+  const patient = await patientService.getPatientById(silknotePatientUuid, userUuid);
   if (!patient?.vectorStore?.assistantId) {
       const errorMsg = !patient ? `Patient with ID ${silknotePatientUuid} not found.` : 'No vector store or assistant configured for this patient.';
       logger.error(`[VECTOR STORE - QAC_OBJ] Error: ${errorMsg}`);
@@ -229,7 +233,7 @@ export async function queryAssistantWithCitationsObject(
                               const clientFileId = mapping?.clientFileId || openAIFilename.split('.')[0];
                               const matchedDocName = mapping?.fileName || openAIFilename;
                               let pageNumber = 1;
-                              const medicalDocument = await storageService.getDocument(clientFileId);
+                              const medicalDocument = await storageService.getDocument(userUuid, silknotePatientUuid, clientFileId);
                               if (medicalDocument?.content?.analysisResult?.pages?.length) {
                                   for (const page of medicalDocument.content.analysisResult.pages) {
                                       if (page.spans?.length) {
@@ -518,7 +522,10 @@ router.get('/generate/:silknotePatientUuid', asyncHandler(async (req: Request, r
   logger.info(`[CASE SUMMARY] Received request to generate summary for patient: ${silknotePatientUuid} by ${requesterId}`);
   
   try {
-    const patient = await getPatientById(silknotePatientUuid);
+    // Extract silknoteUserUuid from request (should be from auth headers in production)
+    const silknoteUserUuid = req.headers['x-user-id'] as string || 'default-user';
+    
+    const patient = await getPatientById(silknotePatientUuid, silknoteUserUuid);
     if (!patient) {
       logger.warn(`[CASE SUMMARY] Patient not found for generation: ${silknotePatientUuid}`);
       return res.status(404).json({ error: 'Patient not found' });
@@ -539,7 +546,7 @@ router.get('/generate/:silknotePatientUuid', asyncHandler(async (req: Request, r
     };
     res.status(202).json(jobTicket);
 
-    generateAndNotify(silknotePatientUuid, requesterId, jobTicket.jobId);
+    generateAndNotify(silknotePatientUuid, requesterId, jobTicket.jobId, silknoteUserUuid);
 
   } catch (error) {
     logger.error(`[CASE SUMMARY] Error initiating summary generation for patient ${silknotePatientUuid}:`, error);
@@ -560,7 +567,7 @@ router.get('/generate/:silknotePatientUuid', asyncHandler(async (req: Request, r
   }
 }));
 
-async function generateAndNotify(silknotePatientUuid: string, requesterId: string, jobId: string) {
+async function generateAndNotify(silknotePatientUuid: string, requesterId: string, jobId: string, silknoteUserUuid?: string) {
   const patientRoom = `patient-${silknotePatientUuid}`;
   try {
     logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] Starting generation for patient: ${silknotePatientUuid}, room: ${patientRoom}, requester: ${requesterId}`);
@@ -572,7 +579,8 @@ async function generateAndNotify(silknotePatientUuid: string, requesterId: strin
       message: 'Processing documents and generating summary...'
     });
 
-    const patient = await getPatientById(silknotePatientUuid);
+    const userUuid = silknoteUserUuid || 'default-user';
+    const patient = await getPatientById(silknotePatientUuid, userUuid);
     if (!patient) {
         logger.error(`[CASE SUMMARY ASYNC JOB: ${jobId}] Patient ${silknotePatientUuid} not found during async processing.`);
         io.to(patientRoom).emit('caseSummaryError', {
@@ -583,7 +591,7 @@ async function generateAndNotify(silknotePatientUuid: string, requesterId: strin
         return;
     }
     
-    const { summary, citations } = await generateComprehensiveCaseSummary(silknotePatientUuid);
+    const { summary, citations } = await generateComprehensiveCaseSummary(silknotePatientUuid, userUuid);
     
     const newCount = (patient.summaryGenerationCount || 0) + 1;
     // Corrected type to CaseSummaryApiResponse
@@ -622,10 +630,12 @@ async function generateAndNotify(silknotePatientUuid: string, requesterId: strin
  * to maximize information extraction while preserving existing citation formats.
  * 
  * @param silknotePatientUuid - Patient ID to generate summary for
+ * @param silknoteUserUuid - User ID (optional, defaults to 'default-user')
  * @returns Promise with complete, properly typed case summary including inconsistencies
  */
 export async function generateComprehensiveCaseSummary(
-  silknotePatientUuid: string
+  silknotePatientUuid: string,
+  silknoteUserUuid?: string
 ): Promise<{ summary: CaseSummaryType; citations: SummaryCitation[] }> {
   const internalGenerate = async (): Promise<{ summary: CaseSummaryType; citations: SummaryCitation[] }> => {
     logger.info(`[VECTOR STORE - GEN_COMP_SUMMARY] START Patient: ${silknotePatientUuid}`);
@@ -634,6 +644,8 @@ export async function generateComprehensiveCaseSummary(
       
       // Initialize array to collect all citations
       let allCitations: SummaryCitation[] = [];
+      
+      const userUuid = silknoteUserUuid || 'default-user';
 
       // 1. Run all extraction steps concurrently
       const [
@@ -642,10 +654,10 @@ export async function generateComprehensiveCaseSummary(
         keyEventsTimelineResult,
         inconsistenciesResult
       ] = await Promise.all([
-        extractPatientInfo(silknotePatientUuid, true), // Pass true
-        extractDiagnosesAndTreatments(silknotePatientUuid, true), // Pass true
-        extractComprehensiveTimeline(silknotePatientUuid, true), // Pass true
-        generateInconsistenciesWithObject(silknotePatientUuid) // No longer needs a parameter
+        extractPatientInfo(silknotePatientUuid, true, userUuid), // Pass userUuid
+        extractDiagnosesAndTreatments(silknotePatientUuid, true, userUuid), // Pass userUuid
+        extractComprehensiveTimeline(silknotePatientUuid, true, userUuid), // Pass userUuid
+        generateInconsistenciesWithObject(silknotePatientUuid, userUuid) // Pass userUuid
       ]);
 
       console.log(`[!!!!!!!!!!!!!!!VECTOR STORE - GEN_COMP_SUMMARY] Inconsistencies Result:`);
@@ -693,7 +705,8 @@ export async function generateComprehensiveCaseSummary(
         silknotePatientUuid,
         patientInfoResult,
         diagnosesAndTreatmentsResult,
-        true // Pass true
+        true, // Pass true
+        userUuid // Pass userUuid
       ).catch(error => {
         logger.error(`[VECTOR STORE - GEN_COMP_SUMMARY] Narrative generation failed: ${error instanceof Error ? error.message : String(error)}`);
         return { 
@@ -1016,7 +1029,8 @@ function ensureValidKeyEvents(keyEvents: any[]): any[] {
  */
 async function extractComprehensiveTimeline(
   silknotePatientUuid: string,
-  embedMarkers: boolean
+  embedMarkers: boolean,
+  silknoteUserUuid?: string // Add optional userUuid parameter
 ): Promise<{ content: any; citations: SummaryCitation[] }> {
   const logTag = 'TIMELINE';
   logger.info(`[${logTag}] START extraction for patient: ${silknotePatientUuid}`);
@@ -1098,7 +1112,8 @@ async function extractComprehensiveTimeline(
       silknotePatientUuid,
       timelinePrompt,
       timelineSchema,
-      embedMarkers
+      embedMarkers,
+      silknoteUserUuid // Add optional userUuid parameter
     );
     
     // Log the raw response for debugging
@@ -1199,7 +1214,8 @@ async function generateNarrativeFromExtractedData(
   silknotePatientUuid: string,
   patientInfo: any,
   diagnosisInfo: any,
-  embedMarkers: boolean // Pass flag
+  embedMarkers: boolean, // Pass flag
+  silknoteUserUuid?: string // Add optional userUuid parameter
 ): Promise<{ content: string; citations: SummaryCitation[] }> { // Return structure matches QAC_OBJ
   // Implement retries with exponential backoff
   let attempts = 0;
@@ -1244,7 +1260,8 @@ async function generateNarrativeFromExtractedData(
         silknotePatientUuid,
         narrativePrompt,
         narrativeSchema,
-        embedMarkers // Pass flag - QAC_OBJ will handle embedding
+        embedMarkers, // Pass flag - QAC_OBJ will handle embedding
+        silknoteUserUuid // Pass userUuid
       );
       
       // Process the result - Extract narrative and citations directly
@@ -1353,7 +1370,8 @@ async function generateNarrativeFromExtractedData(
  */
 async function extractPatientInfo(
   silknotePatientUuid: string,
-  embedMarkers: boolean // Add flag
+  embedMarkers: boolean, // Add flag
+  silknoteUserUuid?: string // Add optional userUuid parameter
 ): Promise<{ content: any; citations: SummaryCitation[] }> {
   const patientInfoSchema = {
     patientName:        "String Patient's full name and citation",
@@ -1397,7 +1415,8 @@ async function extractPatientInfo(
     silknotePatientUuid,
     patientInfoPrompt,
     patientInfoSchema,
-    embedMarkers // Pass flag
+    embedMarkers, // Pass flag
+    silknoteUserUuid // Pass userUuid
   );
 }
 
@@ -1407,7 +1426,8 @@ async function extractPatientInfo(
  */
 async function extractDiagnosesAndTreatments(
   silknotePatientUuid: string,
-  embedMarkers: boolean // Add flag
+  embedMarkers: boolean, // Add flag
+  silknoteUserUuid?: string // Add optional userUuid parameter
 ): Promise<{ content: any; citations: SummaryCitation[] }> {
   const diagnosisSchema = {
       diagnoses: [{
@@ -1458,7 +1478,8 @@ async function extractDiagnosesAndTreatments(
     silknotePatientUuid,
     diagnosisPrompt,
     diagnosisSchema,
-    embedMarkers // Pass flag
+    embedMarkers, // Pass flag
+    silknoteUserUuid // Pass userUuid
   );
 }
 
@@ -1471,7 +1492,8 @@ async function extractDiagnosesAndTreatments(
  * @returns Promise with inconsistencies data using only string values
  */
 export async function generateInconsistenciesWithObject(
-  silknotePatientUuid: string
+  silknotePatientUuid: string,
+  silknoteUserUuid?: string // Add optional userUuid parameter
 ): Promise<{
   content: {
     hasInconsistencies: boolean;
@@ -1489,243 +1511,112 @@ export async function generateInconsistenciesWithObject(
   };
   citations: SummaryCitation[];
 }> {
-  try {
-    const patient = await patientService.getPatientById(silknotePatientUuid);
-    if (!patient) throw new Error('Patient not found');
-    if (!patient.vectorStore?.assistantId) {
-      throw new Error('No vector store assistant configured for patient for inconsistency check');
-    }
-
-    // Define an enhanced schema that captures more detail but can be transformed to match expected output
-    const enhancedInconsistenciesSchema = {
-      hasInconsistencies: "If there is a definable inconsistency, set to true, otherwise set to false and citation",
-      inconsistencies: [{
-        type: "String Category of inconsistency (e.g., 'Laterality', 'Diagnosis', 'Treatment', 'Timeline', 'Insurance', 'Employment', 'LegalProceedings') and citation",
-        description: "String Clear explanation of the contradiction and citation",
-        severity: "String Impact level: 'Low', 'Medium', or 'High' and citation",
-        relatedDocuments: [{
-          id: "String Document ID if available and citation",
-          citationToVectorStoreFile: "String Document title or citation",
-          documentTitle: "String Human-readable document title from citation",
-          contradictingValues: ["String Specific contradicting information found in this document – include exact quotes when possible and citation"]
-        }]
-      }]
-    };
-    
-    // Enhanced prompt for more comprehensive inconsistency analysis
-    const enhancedAnalysisPrompt = `
-    
-    You are a specialized medical contradiction and inconsistency analyzer. Your task is to 
-    identify contradictions and inconsistencies between various medical, employment, insurance, 
-    and legal documents for this patient, AND analyze which side of each inconsistency has 
-    stronger evidence.
-
-    ** HIGHEST CRITICAL INSTRUCTION **: GIVE REFERENCES TO THE VECTOR STORE FILE THAT YOU ARE CITING IN RELATION TO THE DOCUMENT USING YOUR STANDARD FORMAT FOR ALL INFORMATION.
-      
-
-    **IMPORTANT SEARCH REQUIREMENT:** Before concluding your analysis, ensure you have thoroughly searched the available documents using the file search tool. Retrieve and consider a wide range of documents (up to 50 results or more if relevant) to ensure no critical information is missed.
-
-    IMPORTANT: For EACH document you reference, you MUST include THE CITATION TO THE VECTOR STORE FILE THAT YOU RETRIEVED THAT FROM in the citationToVectorStoreFile field inside the relatedDocuments array that records 
-    the exact document name and page number where the information was found.
-    
-    **CRITICAL**: ALWAYS extract the document title from the citation and include it in the documentTitle field. 
-    For example, if the citation is "Document: Initial Assessment Report (page 3)", extract "Initial Assessment Report"
-    as the documentTitle.
-
-    PART 1: IDENTIFY INCONSISTENCIES IN THESE AREAS:
-    
-    MEDICAL INCONSISTENCIES:
-    - Laterality mismatches (e.g., left knee vs. right knee)
-    - Contradictory diagnoses for the same condition
-    - Conflicting treatment recommendations
-    - Inconsistent reporting of medical history
-    - Mismatches in injury mechanism descriptions
-    - Conflicting dates for the same medical event
-    - Contradictions in reported severity or progression
-
-    EMPLOYMENT/INSURANCE/LEGAL INCONSISTENCIES:
-    - Different dates for work status changes
-    - Inconsistencies in work capacity assessments
-    - Conflicting information about insurer assessments
-    - Different dates for legal proceedings
-    - Contradictions in accident descriptions
-
-    PART 2: FOR EACH INCONSISTENCY, PERFORM DETAILED ANALYSIS:
-    
-    1. DOCUMENT BOTH SIDES OF THE CONTRADICTION:
-       - Variant 1: What does one set of documents claim?
-       - Variant 2: What does the contradicting set of documents claim?
-    
-    2. PROVIDE THE MAXIMUM POSSIBLE CITATIONS FOR EACH VARIANT:
-       - Which documents support Variant 1? Include quotes, page numbers, and document titles in the relatedDocuments array
-         Example document: { "documentTitle": "Initial Injury Report", "citationToVectorStoreFile": *PUT THE RELEVANT VECTOR STORE CITATION HERE AS A STRING*, "contradictingValues": ["left knee pain", "mild pain"] }
-       - Which documents support Variant 2? Include document info in the same way
-    
-    3. ANALYZE WHICH VARIANT HAS STRONGER SUPPORT:
-       - Which variant has more documentary evidence?
-       - Which variant has more recent or authoritative sources?
-       - Are there reasons to prefer one variant over the other?
-    
-    4. PROVIDE A RECOMMENDATION:
-       - Based on the evidence, which variant is more likely correct?
-       - Explain your reasoning briefly with references to supporting documents
-
+  const logTag = 'INCONSISTENCIES';
+  logger.info(`[VECTOR STORE - ${logTag}] Starting inconsistency analysis for patient ${silknotePatientUuid}`);
   
-    ** HIGHEST CRITICAL INSTRUCTION **: GIVE REFERENCES TO THE VECTOR STORE FILE THAT YOU ARE CITING IN RELATION TO THE DOCUMENT USING YOUR STANDARD FORMAT FOR ALL INFORMATION.
-    Be comprehensive and thorough - find ALL inconsistencies, not just the obvious ones.
-    Include direct quotes from documents to support your analysis.
-    `;
+  const inconsistencyPrompt = `You are an expert medical inconsistency detector. Your task is to carefully analyze ALL medical documents in the vector store to identify any contradictions, discrepancies, or inconsistencies in the patient's medical record.
 
-    // Use the enhanced query approach
-    const result = await queryAssistantWithCitationsObject(
-      silknotePatientUuid, 
-      enhancedAnalysisPrompt,
-      enhancedInconsistenciesSchema,
-      true // Embed citation markers
-    );
+Look for inconsistencies in:
+1. **Dates and Timeline**: Conflicting dates for the same events, impossible timelines
+2. **Diagnoses**: Contradictory diagnoses or conflicting medical opinions
+3. **Medications**: Drug interactions, conflicting prescriptions, dosage discrepancies
+4. **Treatment Plans**: Contradictory treatment recommendations
+5. **Test Results**: Conflicting lab values, imaging results, or clinical findings
+6. **Patient Information**: Inconsistent personal details, allergies, medical history
+7. **Clinical Notes**: Contradictory statements across different healthcare providers
 
-    // Process the result, ensuring all values are strings
-    if (!result.content || typeof result.content !== 'object') {
-      console.log('[VECTOR STORE] Invalid response format from inconsistency detection');
-      return { content: { hasInconsistencies: false, inconsistencies: [] }, citations: [] };
-    }
+For EACH inconsistency found:
+- Clearly describe what the inconsistency is
+- Identify which specific documents contain the conflicting information  
+- Explain why this represents a potential problem
+- Assess the severity (Critical, High, Medium, Low)
 
-    // Extract the base result
-    const baseResult = result.content as any;
-    
-    // Add more detailed logging
-    console.log('[VECTOR STORE] Raw inconsistencies result structure:', 
-      JSON.stringify({
-        hasResult: !!result,
-        hasContent: !!result.content,
-        contentType: typeof result.content,
-        hasInconsistencies: baseResult?.hasInconsistencies,
-        inconsistenciesIsArray: Array.isArray(baseResult?.inconsistencies),
-        inconsistenciesLength: Array.isArray(baseResult?.inconsistencies) ? baseResult.inconsistencies.length : 'not an array'
-      })
-    );
-    
-    // If no inconsistencies array, log and return empty
-    if (!Array.isArray(baseResult.inconsistencies)) {
-      console.log('[VECTOR STORE] No inconsistencies array in result, returning empty inconsistencies');
-      return { content: { hasInconsistencies: false, inconsistencies: [] }, citations: [] };
-    }
-    
-    // Ensure hasInconsistencies is a boolean
-    const hasInconsistencies = !!baseResult.hasInconsistencies;
-    
-    // Process inconsistencies array, ensuring all values are strings
-    const processedInconsistencies = Array.isArray(baseResult.inconsistencies) 
-      ? baseResult.inconsistencies.map((item: any) => {
-          if (!item || typeof item !== 'object') return null;
-          
-          // Process related documents
-          const relatedDocs = Array.isArray(item.relatedDocuments)
-            ? item.relatedDocuments.map((doc: any) => {
-                if (!doc || typeof doc !== 'object') return null;
-                
-                // Ensure contradictingValues is an array of strings
-                const contradictingValues = Array.isArray(doc.contradictingValues)
-                  ? doc.contradictingValues.map((val: any) => String(val))
-                  : [];
-                
-                // Extract document title from citationToVectorStoreFile if not provided
-                let documentTitle = doc.documentTitle ? String(doc.documentTitle) : '';
-                
-                // If no document title was provided but we have a citation, try to extract title from citation
-                if (!documentTitle && doc.citationToVectorStoreFile) {
-                  const citation = String(doc.citationToVectorStoreFile);
-                  
-                  // Try to extract title from common citation formats
-                  // Format: "Document: Title (page X)"
-                  const docMatch = citation.match(/Document:\s*([^(]+)(?:\s*\(|$)/i);
-                  if (docMatch && docMatch[1]) {
-                    documentTitle = docMatch[1].trim();
-                  }
-                  
-                  // Format: "Title.pdf (page X)"
-                  const pdfMatch = citation.match(/([^/\\]+?)(?:\.pdf|\s+\(page|\s*$)/i);
-                  if (!documentTitle && pdfMatch && pdfMatch[1]) {
-                    // Convert filename format to title case
-                    documentTitle = pdfMatch[1]
-                      .replace(/-/g, ' ')
-                      .replace(/_/g, ' ')
-                      .split(' ')
-                      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-                      .join(' ')
-                      .trim();
-                  }
-                  
-                  // If we still don't have a title, use a sanitized version of the citation
-                  if (!documentTitle) {
-                    documentTitle = citation.replace(/\[\[.*?\]\]/g, '').trim() || 'Unknown Document';
-                  }
-                }
-                
-                return {
-                  id: doc.id || null, // Keep existing ID if provided
-                  citationToVectorStoreFile: doc.citationToVectorStoreFile ? String(doc.citationToVectorStoreFile) : null,
-                  documentTitle: documentTitle,
-                  contradictingValues
-                };
-              }).filter(Boolean) // Remove null entries
-            : [];
-          
-          return {
-            type: String(item.type || 'Unknown'),
-            description: String(item.description || ''),
-            severity: String(item.severity || 'Medium'),
-            relatedDocuments: relatedDocs
-          };
-        }).filter(Boolean) // Remove null entries
-      : [];
+Return a JSON object that identifies whether inconsistencies exist and provides detailed analysis of each one found.
 
-    // Enhance the document references with citation data
-    const enhancedInconsistencies = processedInconsistencies.map((inconsistency: any) => {
-      // Enhance relatedDocuments with citation info if available
-      const enhancedDocs = inconsistency.relatedDocuments.map((doc: any) => {
-        // Look for matching citation by document name
-        const matchingCitation = result.citations.find(citation => 
-          citation.documentName && 
-          (doc.documentTitle?.toLowerCase().includes(citation.documentName.toLowerCase()) || 
-           citation.documentName.toLowerCase().includes(doc.documentTitle?.toLowerCase() || ''))
-        );
-        
-        return {
-          ...doc,
-          id: matchingCitation?.documentId || doc.id,
-          // Use the matching citation's document name if available, keeping the extracted title
-          documentTitle: doc.documentTitle || matchingCitation?.documentName || 'Unknown Document'
-        };
-      });
-      
-      return {
-        ...inconsistency,
-        relatedDocuments: enhancedDocs
-      };
-    });
+IMPORTANT: Use the file search tool extensively to ensure you review ALL available documents. Leave no stone unturned in your analysis.`;
 
-    // Return the processed result ensuring correct structure and string values
-    const finalResult = {
-      content: {
-        hasInconsistencies,
-        inconsistencies: enhancedInconsistencies
+  const inconsistencySchema = {
+    type: 'object',
+    properties: {
+      hasInconsistencies: {
+        type: 'boolean',
+        description: 'Whether any inconsistencies were found in the patient records'
       },
-      citations: result.citations || []
-    };
+      inconsistencies: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            type: {
+              type: 'string',
+              description: 'Category of inconsistency (e.g., Date/Timeline, Diagnosis, Medication, etc.)'
+            },
+            description: {
+              type: 'string', 
+              description: 'Detailed description of the inconsistency found'
+            },
+            severity: {
+              type: 'string',
+              enum: ['Critical', 'High', 'Medium', 'Low'],
+              description: 'Severity level of the inconsistency'
+            },
+            relatedDocuments: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  id: {
+                    type: ['string', 'null'],
+                    description: 'Document identifier if available'
+                  },
+                  citationToVectorStoreFile: {
+                    type: ['string', 'null'], 
+                    description: 'Reference to the vector store file containing this information'
+                  },
+                  documentTitle: {
+                    type: 'string',
+                    description: 'Title or name of the document'
+                  },
+                  contradictingValues: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Specific contradicting values or statements from this document'
+                  }
+                },
+                required: ['documentTitle', 'contradictingValues']
+              }
+            }
+          },
+          required: ['type', 'description', 'severity', 'relatedDocuments']
+        }
+      }
+    },
+    required: ['hasInconsistencies', 'inconsistencies']
+  };
 
-    console.log(`[VECTOR STORE] Generated comprehensive inconsistencies: Found ${finalResult.content.inconsistencies.length} inconsistencies with ${finalResult.citations.length} citations`);
-    return finalResult;
+  try {
+    const result = await queryAssistantWithCitationsObject(
+      silknotePatientUuid,
+      inconsistencyPrompt,
+      inconsistencySchema,
+      false, // Don't embed markers for inconsistencies
+      silknoteUserUuid // Pass userUuid
+    );
+    
+    logger.info(`[VECTOR STORE - ${logTag}] Inconsistency analysis completed for patient ${silknotePatientUuid}`);
+    return result;
     
   } catch (error) {
-    console.error('[VECTOR STORE] Error generating inconsistencies with object:', error);
-    console.error('[VECTOR STORE] Error details:', error instanceof Error ? {
-      name: error.name,
-      message: error.message,
-      stack: error.stack
-    } : String(error));
-    // Return empty result on error
-    return { content: { hasInconsistencies: false, inconsistencies: [] }, citations: [] };
+    logger.error(`[VECTOR STORE - ${logTag}] Error during inconsistency analysis for patient ${silknotePatientUuid}:`, error);
+    
+    // Return a fallback structure if the analysis fails
+    return {
+      content: {
+        hasInconsistencies: false,
+        inconsistencies: []
+      },
+      citations: []
+    };
   }
 }
 

@@ -167,7 +167,7 @@ export async function updatePatient(patientUpdate: Partial<PatientDetails>): Pro
 
   try {
     if (!storageService.isInitialized()) throw new Error('Storage service not initialized');
-    
+
     // Directly call updatePatient assuming the adapter handles the update logic
     const success = await storageService.dbAdapter.updatePatient(patientUpdate.silknoteUserUuid, silknotePatientUuid, patientUpdate);
     if (!success) {
@@ -230,7 +230,7 @@ export async function addFileToPatient(silknotePatientUuid: string, medicalDocum
 
   try {
     if (!storageService.isInitialized()) throw new Error('Storage service not initialized');
-    
+
     const patientExists = await storageService.dbAdapter.getPatient(silknoteUserUuid, silknotePatientUuid);
     if (!patientExists) {
         console.warn(`[PATIENT SERVICE DB] Patient ${silknotePatientUuid} not found. Document will not be added without a valid patient.`);

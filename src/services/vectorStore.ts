@@ -191,27 +191,27 @@ export async function queryVectorStore(
 
   try {
     const patient = await patientService.getPatientById(silknotePatientUuid, silknoteUserUuid);
-    if (!patient) throw new Error('Patient not found');
-    if (!patient.vectorStore?.assistantId) {
-      throw new Error('No vector store assistant configured for patient');
-    }
+  if (!patient) throw new Error('Patient not found');
+  if (!patient.vectorStore?.assistantId) {
+    throw new Error('No vector store assistant configured for patient');
+  }
 
-    const thread = await openai.beta.threads.create();
-    await openai.beta.threads.messages.create(thread.id, {
-      role: 'user',
-      content: query,
-    });
+  const thread = await openai.beta.threads.create();
+  await openai.beta.threads.messages.create(thread.id, {
+    role: 'user',
+    content: query,
+  });
 
-    const run = await openai.beta.threads.runs.create(thread.id, {
-      assistant_id: patient.vectorStore.assistantId,
-    });
+  const run = await openai.beta.threads.runs.create(thread.id, {
+    assistant_id: patient.vectorStore.assistantId,
+  });
 
-    console.log(JSON.stringify(run, null, 2));
+  console.log(JSON.stringify(run, null, 2));
 
-    return {
-      threadId: thread.id,
-      runId: run.id,
-    };
+  return {
+    threadId: thread.id,
+    runId: run.id,
+  };
   } catch (error) {
     console.error('Error in queryVectorStore:', error);
     throw error;

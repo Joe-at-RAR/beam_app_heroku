@@ -16,11 +16,9 @@ const defaultMedicalDocumentContent = (): MedicalDocument['content'] => ({
     // data: undefined, // if part of the type and optional
 });
 
-// Type for a document when its patientFileset (with user info) is also fetched.
 const documentWithPatientContextArgs = {
     include: { patientFileset: { select: { silknoteUserUuid: true, patientName: true, patientDob: true } } }
 } satisfies Prisma.SilknoteDocumentArgs;
-type PrismaDocWithPatientContext = Prisma.SilknoteDocumentGetPayload<typeof documentWithPatientContextArgs>;
 
 // Type for a patient with all their (scalar) documents.
 const patientWithFullDocumentsArgs = {
@@ -245,8 +243,8 @@ export function createPrismaAdapter(): DatabaseAdapter {
                     sourceSystem: document.sourceSystem ?? 'upload',
                     contentJson: JSON.stringify(document.content ?? defaultMedicalDocumentContent()),
                     alertsJson: JSON.stringify(document.alerts ?? []),
-                };
-                
+            };
+
                 const docUuid = document.silknoteDocumentUuid || uuidv4();
 
                 // For create, we need to use the relation instead of the foreign key
@@ -278,7 +276,7 @@ export function createPrismaAdapter(): DatabaseAdapter {
                         patientFileset: { silknoteUserUuid: silknoteUserUuid },
                     },
                     ...documentWithPatientContextArgs // Use predefined args for include
-                });
+                 });
                 return mapPrismaDocumentToMedicalDocument(prismaDoc);
             } catch (error: any) {
                 logger.error(`[PRISMA] Error in getDocument for clientFileId '${clientFileId}':`, error);
@@ -403,7 +401,7 @@ export function createPrismaAdapter(): DatabaseAdapter {
                     vectorStoreJson: patientDetails.vectorStore ? JSON.stringify(patientDetails.vectorStore) : null,
                     caseSummaryJson: patientDetails.caseSummary ? JSON.stringify(patientDetails.caseSummary) : null,
                     summaryGenerationCount: patientDetails.summaryGenerationCount ?? 0,
-                };
+            };
 
                 await prisma.silknotePatientFileset.upsert({
                     where: { silknotePatientUuid: patientDetails.silknotePatientUuid },
@@ -433,7 +431,7 @@ export function createPrismaAdapter(): DatabaseAdapter {
 
         async getAllPatients(silknoteUserUuid: string): Promise<PatientDetails[]> {
             logger.info(`[PRISMA] getAllPatients for user: ${silknoteUserUuid}`);
-            try {
+             try {
                 const patientFilesets = await prisma.silknotePatientFileset.findMany({
                     where: { silknoteUserUuid: silknoteUserUuid },
                     ...patientWithFullDocumentsArgs // Use predefined args for include
@@ -474,7 +472,7 @@ export function createPrismaAdapter(): DatabaseAdapter {
 
         async deletePatient(silknoteUserUuid: string, silknotePatientUuid: string): Promise<boolean> {
             logger.info(`[PRISMA] deletePatient for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}`);
-            try {
+             try {
                 const deleteResult = await prisma.silknotePatientFileset.deleteMany({
                     where: { silknotePatientUuid, silknoteUserUuid },
                 });
@@ -501,7 +499,7 @@ export function createPrismaAdapter(): DatabaseAdapter {
 
         async acknowledgeDocumentAlert(silknoteUserUuid: string, silknotePatientUuid: string, silknoteDocumentUuid: string, alertType: DocumentAlertType): Promise<boolean> {
             logger.info(`[PRISMA] acknowledgeDocumentAlert for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}, docUuid: ${silknoteDocumentUuid}, alertType: ${alertType}`);
-            try {
+             try {
                 const document = await prisma.silknoteDocument.findFirst({
                     where: { silknoteDocumentUuid, patientUuid: silknotePatientUuid, patientFileset: { silknoteUserUuid } },
                     select: { alertsJson: true, clientFileId: true } 
@@ -530,17 +528,17 @@ export function createPrismaAdapter(): DatabaseAdapter {
                 await prisma.silknoteDocument.update({
                     where: { silknoteDocumentUuid: silknoteDocumentUuid },
                     data: { alertsJson: JSON.stringify(updatedAlerts) }
-                });
+                 });
                 return true;
             } catch (error: any) {
                 logger.error(`[PRISMA] Error in acknowledgeDocumentAlert for docUuid '${silknoteDocumentUuid}':`, error);
                 return false;
-            }
+             }
         },
-
+        
         async getQueuedDocuments(silknoteUserUuid: string, silknotePatientUuid: string, limit: number = 10): Promise<string[]> {
             logger.info(`[PRISMA] getQueuedDocuments for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}, limit: ${limit}`);
-            try {
+             try {
                 const documents = await prisma.silknoteDocument.findMany({
                     where: { patientUuid: silknotePatientUuid, patientFileset: { silknoteUserUuid }, status: 'queued' },
                     take: limit,
@@ -556,7 +554,7 @@ export function createPrismaAdapter(): DatabaseAdapter {
 
         async setDocumentStatus(silknoteUserUuid: string, silknotePatientUuid: string, silknoteDocumentUuid: string, status: string): Promise<boolean> {
             logger.info(`[PRISMA] setDocumentStatus for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}, docUuid: ${silknoteDocumentUuid}, status: ${status}`);
-            try {
+              try {
                 const updateResult = await prisma.silknoteDocument.updateMany({
                     where: { silknoteDocumentUuid, patientUuid: silknotePatientUuid, patientFileset: { silknoteUserUuid } },
                       data: { status: status }
@@ -711,7 +709,7 @@ export function createPrismaAdapter(): DatabaseAdapter {
                     logger.warn(`[PRISMA] updateDocument: Doc ${docUuid} (client: ${document.clientFileId}) not found or not owned.`);
                     return false;
                 }
-
+                
                 const documentDataToUpdate: Omit<Prisma.SilknoteDocumentUpdateInput, 'patientFileset' | 'patientUuid'> = {
                     clientFileId: document.clientFileId,
                     originalName: document.originalName,
@@ -837,7 +835,7 @@ export function createPrismaAdapter(): DatabaseAdapter {
 
         async getAllPatients(silknoteUserUuid: string): Promise<PatientDetails[]> {
             logger.info(`[PRISMA] getAllPatients for user: ${silknoteUserUuid}`);
-            try {
+             try {
                 const patientFilesets = await prisma.silknotePatientFileset.findMany({
                     where: { silknoteUserUuid: silknoteUserUuid },
                     ...patientWithFullDocumentsArgs // Use predefined args for include
@@ -845,8 +843,8 @@ export function createPrismaAdapter(): DatabaseAdapter {
                 return patientFilesets.map(pf => mapPrismaPatientToPatientDetails(pf)).filter(p => p !== null) as PatientDetails[];
             } catch (error: any) {
                 logger.error(`[PRISMA] Error in getAllPatients for user '${silknoteUserUuid}':`, error);
-                return [];
-            }
+                 return [];
+             }
         },
 
         async updatePatient(silknoteUserUuid: string, silknotePatientUuid: string, patientUpdates: Partial<PatientDetails>): Promise<boolean> {
@@ -872,13 +870,13 @@ export function createPrismaAdapter(): DatabaseAdapter {
                 return updateResult.count > 0;
             } catch (error: any) {
                 logger.error(`[PRISMA] Error in updatePatient for patient '${silknotePatientUuid}':`, error);
-                return false;
+                 return false;
             }
         },
 
         async deletePatient(silknoteUserUuid: string, silknotePatientUuid: string): Promise<boolean> {
             logger.info(`[PRISMA] deletePatient for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}`);
-            try {
+             try {
                 const deleteResult = await prisma.silknotePatientFileset.deleteMany({
                     where: { silknotePatientUuid, silknoteUserUuid },
                 });
@@ -932,10 +930,10 @@ export function createPrismaAdapter(): DatabaseAdapter {
                 }
 
                 await prisma.silknoteDocument.update({
-                    where: { silknoteDocumentUuid: silknoteDocumentUuid },
+                        where: { silknoteDocumentUuid: silknoteDocumentUuid },
                     data: { alertsJson: JSON.stringify(updatedAlerts) }
-                });
-                return true;
+                    });
+                    return true;
             } catch (error: any) {
                 logger.error(`[PRISMA] Error in acknowledgeDocumentAlert for docUuid '${silknoteDocumentUuid}':`, error);
                 return false;

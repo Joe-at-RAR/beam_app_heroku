@@ -1,5 +1,5 @@
 import { DatabaseAdapter, StorageError } from '../storage-interfaces';
-import { MedicalDocument, PatientDetails, DocumentAlert, DocumentAlertType } from '../../shared/types'; // DocumentType already commented, Added DocumentAlert, DocumentAlertType
+import { MedicalDocument, PatientDetails, DocumentAlertType } from '../../shared/types'; // Removed unused DocumentAlert import
 import fs from 'fs/promises';
 import path from 'path';
 import { createLogger } from '../logger';
@@ -73,40 +73,6 @@ async function saveDatabase(): Promise<void> {
     }
 }
 
-// --- File Path Configuration ---
-const dataDir = path.resolve(__dirname, '..', '..', 'data'); 
-const patientsFilePath = path.join(dataDir, 'patients.json');
-
-// --- In-memory Cache ---
-let patientsCache: { [key: string]: PatientDetails } = {};
-
-// --- Logging Helpers (Simplified as they are unused) ---
-function logInfo(_message: string, _data?: any): void { // message and data already renamed
-  // console.log(`[LOCAL DB ADAPTER] INFO ${new Date().toISOString()} - ${message}`, data ?? '');
-}
-function logError(message: string, error?: Error | any, context?: any): void {
-  const errorDetails = error instanceof Error ? { message: error.message, stack: error.stack } : error;
-  console.error(`[LOCAL DB ADAPTER] ERROR ${new Date().toISOString()} - ${message}`, { error: errorDetails, context: context ?? {} });
-}
-
-// --- Persistence Helper ---
-async function persistPatientsToFile(): Promise<boolean> {
-  if (!isInitialized) {
-    logError('Attempted to persist before initialization');
-    return false;
-  }
-  try {
-    await fs.mkdir(dataDir, { recursive: true });
-    const data = JSON.stringify(patientsCache, null, 2);
-    await fs.writeFile(patientsFilePath, data, { encoding: 'utf-8', mode: 0o644 });
-    logInfo(`Persisted ${Object.keys(patientsCache).length} patients to ${patientsFilePath}`);
-    return true;
-  } catch (error) {
-    logError('Error persisting patients to file', error);
-    return false;
-  }
-}
-
 // --- Adapter Implementation ---
 export function createLocalDatabaseAdapter(): DatabaseAdapter {
   logger.info('Local DB Adapter created.');
@@ -121,7 +87,8 @@ export function createLocalDatabaseAdapter(): DatabaseAdapter {
     return localDb.users[silknoteUserUuid].patients;
   };
 
-  return {
+  // Create the adapter object first to have access to its methods
+  const adapter: DatabaseAdapter = {
     async initialize(): Promise<{ success: boolean; errors: StorageError[] }> {
       if (isInitialized) return { success: true, errors: [] };
       logger.info('Initializing Local DB Adapter...');
@@ -182,7 +149,7 @@ export function createLocalDatabaseAdapter(): DatabaseAdapter {
         logger.error('[LOCAL_DB] updateDocument requires document.silknoteDocumentUuid for matching existing doc.');
         return false;
       }
-      return this.saveDocument(silknoteUserUuid, silknotePatientUuid, document);
+      return adapter.saveDocument(silknoteUserUuid, silknotePatientUuid, document);
     },
 
     async deleteDocument(silknoteUserUuid: string, silknotePatientUuid: string, clientFileId: string): Promise<boolean> {
@@ -211,7 +178,7 @@ export function createLocalDatabaseAdapter(): DatabaseAdapter {
     async addDocumentToPatient(silknoteUserUuid: string, silknotePatientUuid: string, document: MedicalDocument): Promise<boolean> {
       logger.info(`[LOCAL_DB] addDocumentToPatient for user ${silknoteUserUuid}, patient ${silknotePatientUuid}, clientFileId: ${document.clientFileId}`);
       if (!document.silknoteDocumentUuid) document.silknoteDocumentUuid = uuidv4();
-      return this.saveDocument(silknoteUserUuid, silknotePatientUuid, document);
+      return adapter.saveDocument(silknoteUserUuid, silknotePatientUuid, document);
     },
 
     async savePatient(silknoteUserUuid: string, patientDetails: PatientDetails): Promise<boolean> {
@@ -370,14 +337,17 @@ export function createLocalDatabaseAdapter(): DatabaseAdapter {
     async forceReprocessDocument(silknoteUserUuid: string, silknotePatientUuid: string, silknoteDocumentUuid: string): Promise<boolean> {
       if (!isInitialized) throw new Error('Adapter not initialized');
       logger.info(`[LOCAL_DB] forceReprocessDocument for user ${silknoteUserUuid}, patient ${silknotePatientUuid}, docUuid ${silknoteDocumentUuid}`);
-      return this.setDocumentStatus(silknoteUserUuid, silknotePatientUuid, silknoteDocumentUuid, 'queued');
+      // Directly update the document status instead of calling through adapter
+      const userPatients = getUserPatientsCollection(silknoteUserUuid);
+      const patient = userPatients[silknotePatientUuid];
+      if (!patient || !patient.fileSet) return false;
+      const docIndex = patient.fileSet.findIndex(d => d.silknoteDocumentUuid === silknoteDocumentUuid);
+      if (docIndex === -1) return false;
+      patient.fileSet[docIndex].status = 'queued';
+      await saveDatabase();
+      return true;
     }
   };
-}
 
-function getUserPatients(silknoteUserUuid: string): { [patientUuid: string]: PatientDetails } {
-    if (!localDb.users[silknoteUserUuid]) {
-        localDb.users[silknoteUserUuid] = { patients: {} };
-                    }
-    return localDb.users[silknoteUserUuid].patients;
+  return adapter;
 } 

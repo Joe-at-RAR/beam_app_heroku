@@ -75,7 +75,7 @@ router.get('/:documentId', async (req, res) => {
   // --- If we are in SILKNOTE (Azure Blob) mode ---
   if (config.storage.type !== 'LOCAL') {
     try {
-      const buffer = await storageService.getFileContent(filePath)
+      const buffer = await storageService.getFileContent(filePath);
       res.setHeader('Content-Type', 'application/pdf')
       res.setHeader('Content-Disposition', `inline; filename="${documentRecord.originalName || path.basename(filePath)}"`)
       return res.end(buffer)
@@ -118,7 +118,24 @@ router.delete('/:documentId', asyncHandler(async (req: Request, res: Response) =
     logger.info(`Received request to delete document ${documentId}`);
 
     try {
-        const success = await storageService.deleteDocument(documentId);
+        // Add placeholder userUuid - in production this should come from auth headers
+        const userUuid = req.headers['x-user-id'] as string || 'default-user';
+        
+        // First get the document to find its patient UUID
+        const documentRecord = await documentService.getDocumentById(documentId);
+        if (!documentRecord) {
+            logger.warn(`Document ${documentId} not found for deletion`);
+            return res.status(404).json({ error: 'Document not found.' });
+        }
+        
+        // Get patient UUID from the document record
+        const patientUuid = documentRecord.silknotePatientUuid;
+        if (!patientUuid) {
+            logger.error(`Document ${documentId} has no patient UUID associated`);
+            return res.status(400).json({ error: 'Document has no patient association.' });
+        }
+        
+        const success = await storageService.deleteDocument(userUuid, patientUuid, documentId);
         if (success) {
             logger.info(`Successfully deleted document reference ${documentId}`);
             // Use 204 No Content for successful deletion with no body

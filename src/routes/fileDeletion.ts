@@ -8,10 +8,13 @@ const router: express.Router = express.Router();
 router.delete('/:silknotePatientUuid/files/:fileId', async (req, res) => {
   const { silknotePatientUuid, fileId } = req.params;
   try {
+    // Add placeholder userUuid - in production this should come from auth headers
+    const silknoteUserUuid = req.headers['x-user-id'] as string || 'default-user';
+    
     // Delete the physical file and thumbnails
     await deleteFile(fileId);
     // Remove file metadata from the patient record
-    await deleteFileFromPatient(silknotePatientUuid, fileId);
+    await deleteFileFromPatient(silknotePatientUuid, fileId, silknoteUserUuid);
     // Emit the fileDeleted event for real-time UI updates
     io.emit('fileDeleted', { silknotePatientUuid, fileId });
     res.status(204).end();

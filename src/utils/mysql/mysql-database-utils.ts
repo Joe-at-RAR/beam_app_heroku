@@ -107,64 +107,6 @@ export function createMySqlDatabaseAdapter(): DatabaseAdapter {
       }
   }
 
-  // --- Standalone Queue/VSRX Methods ---
-  async function getQueuedDocuments(silknoteUserUuid: string, silknotePatientUuid: string, limit: number = 10): Promise<string[]> {
-    if (!isInitialized) throw new Error('Adapter not initialized');
-    logInfo('Fetching queued document IDs', { limit, silknotePatientUuid, silknoteUserUuid });
-    const sql = "SELECT silknoteDocumentUuid FROM Document WHERE status = 'queued' AND patientUuid = ? ORDER BY createdAt ASC LIMIT ?";
-    try {
-      const rows = await executeQuery<RowDataPacket[]>(sql, [silknotePatientUuid, limit]);
-      return rows.map((row: RowDataPacket) => String(row['silknoteDocumentUuid']));
-    } catch (error) {
-      return [];
-    }
-  }
-
-  async function setDocumentStatus(silknoteUserUuid: string, silknotePatientUuid: string, silknoteDocumentUuid: string, status: string): Promise<boolean> {
-     if (!isInitialized) throw new Error('Adapter not initialized');
-     if (!silknoteDocumentUuid || !status) return false;
-     logInfo('Setting document status', { silknoteDocumentUuid, status, silknotePatientUuid, silknoteUserUuid });
-     const sql = 'UPDATE Document SET status = ?, updatedAt = NOW() WHERE silknoteDocumentUuid = ? AND patientUuid = ?';
-     try {
-         const result = await executeQuery<ResultSetHeader>(sql, [status, silknoteDocumentUuid, silknotePatientUuid]);
-         return result.affectedRows > 0;
-     } catch (error) {
-         return false;
-     }
-  }
-
-  async function resetProcessingDocuments(): Promise<number> {
-       if (!isInitialized) throw new Error('Adapter not initialized');
-       logInfo('Resetting processing documents');
-       const sql = "UPDATE Document SET status = 'queued', updatedAt = NOW() WHERE status = 'processing'";
-       try {
-           const result = await executeQuery<ResultSetHeader>(sql, []);
-           logInfo(`Reset ${result.affectedRows} documents.`);
-           return result.affectedRows;
-       } catch (error) {
-           return 0;
-       }
-   }
-
-   async function forceReprocessPatientDocuments(silknoteUserUuid: string, silknotePatientUuid: string): Promise<number> {
-      if (!isInitialized) throw new Error('Adapter not initialized');
-      if (!silknotePatientUuid) return 0;
-      logInfo('Forcing reprocess for patient documents', { silknotePatientUuid, silknoteUserUuid });
-      const sql = "UPDATE Document SET status = 'queued', updatedAt = NOW() WHERE patientUuid = ? AND status != 'queued'";
-      try {
-         const result = await executeQuery<ResultSetHeader>(sql, [silknotePatientUuid]);
-         logInfo(`Queued ${result.affectedRows} documents for reprocessing for patient ${silknotePatientUuid}.`);
-         return result.affectedRows;
-      } catch (error) {
-         return 0;
-      }
-   }
-
-   async function forceReprocessDocument(silknoteUserUuid: string, silknotePatientUuid: string, silknoteDocumentUuid: string): Promise<boolean> {
-      if (!isInitialized) throw new Error('Adapter not initialized');
-      return setDocumentStatus(silknoteUserUuid, silknotePatientUuid, silknoteDocumentUuid, 'queued');
-   }
-
   const adapter: DatabaseAdapter = {
     async initialize(): Promise<{success: boolean; errors: StorageError[]}> {
         if (isInitialized) return { success: true, errors: [] };
@@ -454,7 +396,16 @@ export function createMySqlDatabaseAdapter(): DatabaseAdapter {
 
        async forceReprocessDocument(silknoteUserUuid: string, silknotePatientUuid: string, silknoteDocumentUuid: string): Promise<boolean> {
           if (!isInitialized) throw new Error('Adapter not initialized');
-          return setDocumentStatus(silknoteUserUuid, silknotePatientUuid, silknoteDocumentUuid, 'queued');
+          // Directly update the document status
+          if (!silknoteDocumentUuid) return false;
+          logInfo('Setting document status to queued', { silknoteDocumentUuid, silknotePatientUuid, silknoteUserUuid });
+          const sql = 'UPDATE Document SET status = ?, updatedAt = NOW() WHERE silknoteDocumentUuid = ? AND patientUuid = ?';
+          try {
+              const result = await executeQuery<ResultSetHeader>(sql, ['queued', silknoteDocumentUuid, silknotePatientUuid]);
+              return result.affectedRows > 0;
+          } catch (error) {
+              return false;
+          }
        },
 
      // --- Missing Methods Implementation ---

@@ -580,7 +580,8 @@ async function processDocument(input: QueuedDocument): Promise<void> {
               // Call vectorStore processing - no mapping parameter needed as filename is already set
               await processDocumentsForVectorStore(
                 [vectorStoreFile], 
-                patientContext.silknotePatientUuid
+                patientContext.silknotePatientUuid,
+                patientContext.silknoteUserUuid || 'default-user'
               );
             } finally {
               // Clear vector buffer
@@ -635,7 +636,11 @@ async function processDocument(input: QueuedDocument): Promise<void> {
               pageImages: []
             }
           };
-          await patientService.updateFileForPatient(patientContext.silknotePatientUuid, completeDoc);
+          await patientService.updateFileForPatient(
+            patientContext.silknotePatientUuid, 
+            completeDoc, 
+            patientContext.silknoteUserUuid || 'default-user'
+          );
           Object.assign(partialDoc, completeDoc);
           break;
       }
@@ -698,7 +703,11 @@ async function processDocument(input: QueuedDocument): Promise<void> {
         };
         
         // Persist the error document
-        await patientService.updateFileForPatient(patientContext.silknotePatientUuid, errorDocument);
+        await patientService.updateFileForPatient(
+          patientContext.silknotePatientUuid, 
+          errorDocument, 
+          patientContext.silknoteUserUuid || 'default-user'
+        );
         
         // Emit the error status
         const errorUpdate = {
@@ -942,17 +951,19 @@ export const documentService = {
 
     // Optionally, verify user has access to the patient if silknoteUserUuid is provided
     if (silknotePatientUuid && silknoteUserUuid) {
-      const patient = await patientService.getPatientById(silknotePatientUuid);
+      const patient = await patientService.getPatientById(silknotePatientUuid, silknoteUserUuid);
       if (!patient || patient.silknoteUserUuid !== silknoteUserUuid) {
         logger.warn(`[DOCUMENT SERVICE] User ${silknoteUserUuid} does not have access to patient ${silknotePatientUuid} or patient not found.`);
         return null; // Or throw an authorization error
       }
     }
 
-    // Delegate directly to storageService.getDocument,
-    // The storageService.getDocument will now also need to accept silknotePatientUuid
-    // TEMPORARY: Call with one arg until storageService is updated
-    const document = await storageService.getDocument(decodedDocumentId /*, silknotePatientUuid */);
+    // Use the new 3-parameter signature for storageService.getDocument
+    const document = await storageService.getDocument(
+      silknoteUserUuid || 'default-user', 
+      silknotePatientUuid || '', 
+      decodedDocumentId
+    );
 
     if (document) {
       // If silknotePatientUuid was provided for the lookup, ensure the found document actually belongs to that patient.
@@ -985,9 +996,13 @@ export const documentService = {
   },
   
   // Update an existing document
-  async updateDocument(document: MedicalDocument): Promise<boolean> {
+  async updateDocument(document: MedicalDocument, silknoteUserUuid?: string): Promise<boolean> {
     // Update operations should also ensure the user has rights, typically handled at route/controller level before service call
-    return storageService.updateDocument(document);
+    return storageService.updateDocument(
+      silknoteUserUuid || 'default-user',
+      document.silknotePatientUuid,
+      document
+    );
   }
 };
 

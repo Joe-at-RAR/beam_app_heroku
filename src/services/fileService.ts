@@ -85,8 +85,8 @@ export class FileProcessor {
       this.isProcessing = true;
       console.log(`[${new Date().toISOString()}] [FILE PROCESSOR] Starting to process file: ${fileId}`);
 
-      // Step 1: Find all patients
-      const patients = await patientService.getPatients();
+      // Step 1: Find all patients - use default user for queue processing
+      const patients = await patientService.getPatients('default-user');
       let targetPatient = null;
       let file = null;
 
@@ -215,7 +215,8 @@ export function createFileMetadata(silknotePatientUuid: string, file: UploadedFi
 
 export async function processUnprocessedFiles(silknotePatientUuid: string) {
   try {
-    const patient = await patientService.getPatientById(silknotePatientUuid);
+    // Use default user for processing context
+    const patient = await patientService.getPatientById(silknotePatientUuid, 'default-user');
     if (!patient) {
       console.log(`No patient found with ID ${silknotePatientUuid}`);
       return;
