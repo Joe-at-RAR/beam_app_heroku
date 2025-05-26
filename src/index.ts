@@ -41,7 +41,7 @@ app.use(cors({
   origin: config.server.corsOrigin,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true,
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID', 'X-Debug-Info', 'X-Client-Timestamp']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID', 'X-Debug-Info', 'X-Client-Timestamp', 'x-silknote-user-uuid', 'x-silknote-patient-uuid']
 }));
 
 // Log CORS configuration for debugging
