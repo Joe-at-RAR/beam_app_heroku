@@ -1603,7 +1603,7 @@ IMPORTANT: Use the file search tool extensively to ensure you review ALL availab
     
   } catch (error) {
     logger.error(`[VECTOR STORE - ${logTag}] Error during inconsistency analysis for patient ${silknotePatientUuid}:`, error);
-    
+
     // Return a fallback structure if the analysis fails
     return {
       content: {
