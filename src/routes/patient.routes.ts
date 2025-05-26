@@ -153,38 +153,9 @@ router.get('/:silknotePatientUuid/files', async (req, res) => {
       })
     }
     
-    // Optimize the response for large datasets
-    const optimizedFiles = files.map(file => {
-      try {
-        // Create a new object without modifying the original
-        const { content, ...fileWithoutContent } = file;
-        
-        // Include only necessary content fields
-        return {
-          ...fileWithoutContent,
-          content: {
-            pageImages: Array.isArray(content?.pageImages) ? content.pageImages : [],
-            hasAnalysisResult: !!(content?.analysisResult),
-            hasExtractedSchemas: Array.isArray(content?.extractedSchemas) && content.extractedSchemas.length > 0,
-            hasEnrichedSchemas: Array.isArray(content?.enrichedSchemas) && content.enrichedSchemas.length > 0
-          }
-        };
-      } catch (mapError) {
-        // Return a minimal version if mapping fails
-        return {
-          clientFileId: file?.clientFileId || 'unknown',
-          silknotePatientUuid: file?.silknotePatientUuid || silknotePatientUuid,
-          title: file?.title || 'Error processing file',
-          status: 'error',
-          category: file?.category || 'UNKNOWN',
-          uploadDate: file?.uploadDate || new Date().toISOString(),
-          content: { pageImages: [] }
-        };
-      }
-    });
-    
+    // Return the full document objects without optimization
     return res.json({
-      files: optimizedFiles,
+      files: files,
       timestamp,
       silknotePatientUuid,
       count: files.length
@@ -261,8 +232,8 @@ router.post(
     /* ---------------- INITIAL FAST PASS ---------------- */
     const docsForAsync: MedicalDocument[] = [];
 
-    for (let i = 0; i < files.length; i++) {
-      const file         = files[i];
+    // Process all files in parallel instead of sequentially
+    const filePromises = files.map(async (file, i) => {
       const clientFileId = Array.isArray(rawClientIds) ? rawClientIds[i] : rawClientIds;
 
       if (!clientFileId) {
@@ -274,12 +245,12 @@ router.post(
           stage: 'client_id_missing',
           error: 'clientFileId missing for file'
         });
-        continue;
+        return null;
       }
 
       try {
         const initialDoc = await quickStore(file, clientFileId, patient, silknoteUserUuid);
-        docsForAsync.push(initialDoc);
+        return initialDoc;
       } catch (err: any) {
         console.error('[PROCESS] 🛑 Sync failure for', file.originalname, err);
         emitToPatientRoom(silknotePatientUuid, 'fileStatus', {
@@ -289,6 +260,17 @@ router.post(
           stage: 'initial_storage_failed',
           error: err.message || 'unknown error'
         });
+        return null;
+      }
+    });
+
+    // Wait for all files to be processed in parallel
+    const results = await Promise.all(filePromises);
+    
+    // Filter out null results (failed uploads)
+    for (const doc of results) {
+      if (doc) {
+        docsForAsync.push(doc);
       }
     }
 
