@@ -567,27 +567,40 @@ router.get('/generate/:silknotePatientUuid', asyncHandler(async (req: Request, r
 
 async function generateAndNotify(silknotePatientUuid: string, requesterId: string, jobId: string, silknoteUserUuid: string) {
   const patientRoom = `patient-${silknotePatientUuid}`;
+  const startTime = Date.now();
+  
   try {
-    logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] Starting generation for patient: ${silknotePatientUuid}, room: ${patientRoom}, requester: ${requesterId}`);
+    logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] === START ASYNC GENERATION ===`);
+    logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] Patient: ${silknotePatientUuid}`);
+    logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] Room: ${patientRoom}`);
+    logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] Requester: ${requesterId}`);
+    logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] User UUID: ${silknoteUserUuid}`);
 
+    // Emit initial status
+    logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] Emitting 'processing' status to room ${patientRoom}`);
     io.to(patientRoom).emit('caseSummaryStatus', {
       patientId: silknotePatientUuid,
       jobId,
       status: 'processing',
       message: 'Processing documents and generating summary...'
     });
+    logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] 'processing' status emitted`);
 
     const patient = await getPatientById(silknotePatientUuid, silknoteUserUuid);
     if (!patient) {
         logger.error(`[CASE SUMMARY ASYNC JOB: ${jobId}] Patient ${silknotePatientUuid} not found during async processing.`);
+        
+        logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] Emitting 'caseSummaryError' - patient not found`);
         io.to(patientRoom).emit('caseSummaryError', {
             patientId: silknotePatientUuid,
             jobId,
             error: 'Patient not found during processing.'
         });
+        logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] 'caseSummaryError' emitted for patient not found`);
         return;
     }
     
+    logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] Starting comprehensive case summary generation...`);
     const { summary, citations } = await generateComprehensiveCaseSummary(silknotePatientUuid, silknoteUserUuid);
     
     const newCount = (patient.summaryGenerationCount || 0) + 1;
@@ -599,26 +612,83 @@ async function generateAndNotify(silknotePatientUuid: string, requesterId: strin
       maxCount: 5 // Use hardcoded 5 for now
     };
     
+    // Log the summary structure before storing
+    logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] Summary generated successfully`);
+    logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] Summary structure: ${JSON.stringify({
+      hasSummary: !!summary,
+      citationCount: citations?.length || 0,
+      summaryGenerationCount: newCount,
+      maxCount: 5,
+      summaryKeys: Object.keys(summary || {}),
+      narrativeLength: summary?.narrativeOverview?.length || 0,
+      diagnosesCount: summary?.diagnoses?.length || 0,
+      treatmentsCount: summary?.treatments?.length || 0,
+      keyEventsCount: summary?.keyEvents?.length || 0,
+      hasInconsistencies: summary?.medicalInconsistencies?.hasInconsistencies || false
+    })}`);
+    
+    // Log sample of the actual content
+    logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] Sample content - Patient Name: ${summary?.patientName?.substring(0, 50)}`);
+    logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] Sample content - Narrative preview: ${summary?.narrativeOverview?.substring(0, 100)}...`);
+    
     const patientToUpdate = { ...patient, caseSummary: summaryToStore, summaryGenerationCount: newCount };
+    logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] Updating patient in database...`);
     await updatePatient(patientToUpdate);
+    logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] Patient updated successfully`);
 
-    logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] Generation complete for patient: ${silknotePatientUuid}. Notifying room: ${patientRoom}`);
-
-    io.to(patientRoom).emit('caseSummaryComplete', {
+    const generationTime = Date.now() - startTime;
+    logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] === GENERATION COMPLETE ===`);
+    logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] Total generation time: ${generationTime}ms`);
+    logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] Preparing to emit 'caseSummaryComplete' to room: ${patientRoom}`);
+    
+    // Log the exact data being sent
+    const emitData = {
       patientId: silknotePatientUuid,
       jobId,
       status: 'complete',
       data: summaryToStore
-    });
+    };
+    
+    logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] Emit data size: ${JSON.stringify(emitData).length} bytes`);
+    logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] Emitting 'caseSummaryComplete' with data structure: ${JSON.stringify({
+      patientId: emitData.patientId,
+      jobId: emitData.jobId,
+      status: emitData.status,
+      dataKeys: Object.keys(emitData.data || {}),
+      hasSummary: !!emitData.data?.summary,
+      citationCount: emitData.data?.citations?.length || 0
+    })}`);
+    
+    // Perform the actual emission
+    io.to(patientRoom).emit('caseSummaryComplete', emitData);
+    
+    logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] 'caseSummaryComplete' emitted successfully`);
+    logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] === END ASYNC GENERATION ===`);
 
   } catch (error) {
-    logger.error(`[CASE SUMMARY ASYNC JOB: ${jobId}] Error during async summary generation for ${silknotePatientUuid}:`, error);
-    io.to(patientRoom).emit('caseSummaryError', {
+    const errorTime = Date.now() - startTime;
+    logger.error(`[CASE SUMMARY ASYNC JOB: ${jobId}] === ERROR DURING GENERATION ===`);
+    logger.error(`[CASE SUMMARY ASYNC JOB: ${jobId}] Error after ${errorTime}ms:`, error);
+    logger.error(`[CASE SUMMARY ASYNC JOB: ${jobId}] Error type: ${error?.constructor?.name}`);
+    logger.error(`[CASE SUMMARY ASYNC JOB: ${jobId}] Error message: ${error instanceof Error ? error.message : String(error)}`);
+    if (error instanceof Error && error.stack) {
+      logger.error(`[CASE SUMMARY ASYNC JOB: ${jobId}] Stack trace: ${error.stack}`);
+    }
+    
+    const errorEmitData = {
       patientId: silknotePatientUuid,
       jobId,
       status: 'error',
       error: error instanceof Error ? error.message : 'Failed to generate case summary'
-    });
+    };
+    
+    logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] Emitting 'caseSummaryError' to room: ${patientRoom}`);
+    logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] Error emit data: ${JSON.stringify(errorEmitData)}`);
+    
+    io.to(patientRoom).emit('caseSummaryError', errorEmitData);
+    
+    logger.info(`[CASE SUMMARY ASYNC JOB: ${jobId}] 'caseSummaryError' emitted`);
+    logger.error(`[CASE SUMMARY ASYNC JOB: ${jobId}] === END ERROR HANDLING ===`);
   }
 }
 
@@ -722,10 +792,6 @@ export async function generateComprehensiveCaseSummary(
 
         // Narrative
         narrativeOverview: narrativeResult?.content || "", 
-
-        // Medical history
-        medicalHistory: diagnosesAndTreatmentsResult?.content?.medicalHistory || [],
-        medicalTimeline: keyEventsTimelineResult?.content?.medicalTimeline || [],
 
         // Diagnoses / treatments - *** CORRECTED ACCESS PATH ***
         diagnoses: diagnosesAndTreatmentsResult?.content.diagnoses || [],
@@ -838,8 +904,6 @@ function ensureValidCaseSummaryFormat(summary: any): CaseSummaryType {
     keyEvents: [],
     treatments: [],
     testResults: [],
-    medicalHistory: [],
-    medicalTimeline: [],
     employerName: "",
     employmentStatus: "",
     workRelatedInjury: false,
@@ -928,8 +992,6 @@ function ensureValidCaseSummaryFormat(summary: any): CaseSummaryType {
     keyEvents: sanitiseKeyEvents(merged.keyEvents),
     treatments: sanitiseTreatments(merged.treatments),
     testResults: sanitiseTestResults(merged.testResults),
-    medicalHistory: safeArray(merged.medicalHistory),
-    medicalTimeline: safeArray(merged.medicalTimeline),
 
     // medicalInconsistencies – ensure object and inner array
     medicalInconsistencies: {
