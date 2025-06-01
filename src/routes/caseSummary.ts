@@ -82,6 +82,29 @@ function escapeRegExp(string: string) {
 }
 
 /**
+ * Fixes JSON strings where citation markers appear after non-string values
+ * For example: "field": true【cite-123】, -> "field": true,
+ */
+function fixMisplacedCitationMarkers(jsonText: string): string {
+  // Fix citations after boolean values
+  jsonText = jsonText.replace(/:\s*(true|false)(【[^】]+】)/g, ': $1');
+  
+  // Fix citations after numbers
+  jsonText = jsonText.replace(/:\s*(-?\d+(?:\.\d+)?)(【[^】]+】)/g, ': $1');
+  
+  // Fix citations after null
+  jsonText = jsonText.replace(/:\s*(null)(【[^】]+】)/g, ': $1');
+  
+  // Fix stray quotes after citations that break JSON
+  jsonText = jsonText.replace(/(【[^】]+】)"\s*,/g, '$1",');
+  
+  // Fix arrays/objects with citations
+  jsonText = jsonText.replace(/(\]|\})(【[^】]+】)/g, '$1');
+  
+  return jsonText;
+}
+
+/**
  * Extracts valid JSON from a string that may contain markdown, comments, or other non-JSON content.
  * Designed to be robust against various input formats including code blocks and surrounding text.
  * 
@@ -94,6 +117,9 @@ function extractCleanJsonFromText(input: string): string {
   try {
     // Step 1: Handle markdown code blocks by removing ```json and ``` markers
     let cleanedText = input.replace(/```(json|javascript|js)?\s*/g, '').replace(/```\s*$/g, '');
+    
+    // Step 1.5: Fix misplaced citation markers before JSON extraction
+    cleanedText = fixMisplacedCitationMarkers(cleanedText);
     
     // Step 2: Find the first { and last } to extract the JSON object
     const firstBrace = cleanedText.indexOf('{');
@@ -162,7 +188,11 @@ export async function queryAssistantWithCitationsObject(
     - WHEN ADDING YOUR ANNOTATIONS THAT REFER TO DOCUMENTS IN THE VECTOR STORE THAT YOU MUST DO A VAST SEARCH UPON TO RETRIEVE MAXIMUM INFORMATION: 
     - WHEN CREATING YOUR RESPONSE - YOU MUST NEVER PLACE CITATIONS OUTSIDE OF THE STRING PROPERTIES - THIS IS ABSOLUTELY CRUCIAL.
     - EVERYTHING THAT IS A STRING MUST HAVE AN ANNOTATION THAT REFERENCES THE DOCUMENT IT CAME FROM. 
-    - ANY PROPERTY THAT IS NOT A STRING  MUST BE DERIVED FROM THE DOCUMENTS BUT MUST NOT HAVE AN ANNOTATION ASSOCIATED.`;
+    - ANY PROPERTY THAT IS NOT A STRING (boolean, number, null, array, object) MUST BE DERIVED FROM THE DOCUMENTS BUT MUST NOT HAVE AN ANNOTATION ASSOCIATED.
+    - CRITICAL: For boolean fields like "workRelatedInjury": true, DO NOT add citations after the value. Citations can ONLY appear inside quoted string values.
+    - EXAMPLE CORRECT: "name": "John Smith【citation】"
+    - EXAMPLE WRONG: "active": true【citation】
+    - EXAMPLE WRONG: "count": 5【citation】`;
 
   const thread = await openai.beta.threads.create();
   logger.info(`[VECTOR STORE - QAC_OBJ] Created thread ${thread.id}`);
@@ -1154,7 +1184,8 @@ async function extractComprehensiveTimeline(
         significance: "String Significance of this event to the case",
         notes: "String Additional notes about the event",
         citations: "String Citations to the documents you searched fror the response."
-      }]
+      }],
+      workRelatedInjury: "Boolean Whether the injury is work-related"
     };
     
     
@@ -1219,7 +1250,7 @@ async function extractComprehensiveTimeline(
     
     if (!result.content) {
       logger.warn(`[${logTag}] ⚠️ Empty content received from assistant!`);
-      return { content: { events: [], keyEvents: [] }, citations: result.citations || [] };
+      return { content: { events: [], keyEvents: [], workRelatedInjury: false }, citations: result.citations || [] };
     }
     
     // Check if events array exists and log details
@@ -1285,6 +1316,14 @@ async function extractComprehensiveTimeline(
         logger.info(`[${logTag}] Final keyEvents count: ${result.content.keyEvents.length}`);
       } else {
         logger.warn(`[${logTag}] ⚠️ Final keyEvents array is empty or missing!`);
+      }
+      
+      // Log workRelatedInjury status
+      if ('workRelatedInjury' in result.content) {
+        logger.info(`[${logTag}] workRelatedInjury: ${result.content.workRelatedInjury}`);
+      } else {
+        logger.info(`[${logTag}] workRelatedInjury not found in response, defaulting to false`);
+        result.content.workRelatedInjury = false;
       }
     }
 
