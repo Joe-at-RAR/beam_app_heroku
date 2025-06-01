@@ -727,6 +727,46 @@ export async function generateComprehensiveCaseSummary(
 
       console.log(`[!!!!!!!!!!!!!!!VECTOR STORE - GEN_COMP_SUMMARY] Inconsistencies Result:`);
       console.log( inconsistenciesResult);
+      
+      // Check if the inconsistencies result is actually data or if it's the schema
+      let actualInconsistenciesContent = inconsistenciesResult?.content;
+      
+      // If the content has 'type' and 'properties' fields, it means the AI returned the schema instead of data
+      if (actualInconsistenciesContent && 
+          typeof actualInconsistenciesContent === 'object' && 
+          'type' in actualInconsistenciesContent && 
+          'properties' in actualInconsistenciesContent) {
+        logger.warn(`[VECTOR STORE - GEN_COMP_SUMMARY] ⚠️ Inconsistencies analysis returned schema instead of data! Using default.`);
+        console.log(`[GEN_COMP_SUMMARY DEBUG] 🔴 WARNING: Inconsistencies returned schema instead of data!`);
+        console.log(`[GEN_COMP_SUMMARY DEBUG] Schema detection - content.type: "${actualInconsistenciesContent.type}"`);
+        console.log(`[GEN_COMP_SUMMARY DEBUG] Schema detection - has properties: ${!!actualInconsistenciesContent.properties}`);
+        
+        // Use default empty inconsistencies
+        actualInconsistenciesContent = {
+          hasInconsistencies: false,
+          inconsistencies: []
+        };
+      } else if (actualInconsistenciesContent) {
+        // Log the actual inconsistencies data received
+        console.log(`[GEN_COMP_SUMMARY DEBUG] ✅ Inconsistencies data received properly`);
+        console.log(`[GEN_COMP_SUMMARY DEBUG] hasInconsistencies: ${actualInconsistenciesContent.hasInconsistencies}`);
+        console.log(`[GEN_COMP_SUMMARY DEBUG] Number of inconsistencies: ${actualInconsistenciesContent.inconsistencies?.length || 0}`);
+        
+        if (actualInconsistenciesContent.inconsistencies && actualInconsistenciesContent.inconsistencies.length > 0) {
+          console.log(`[GEN_COMP_SUMMARY DEBUG] Inconsistencies found:`);
+          actualInconsistenciesContent.inconsistencies.forEach((inc: any, idx: number) => {
+            console.log(`[GEN_COMP_SUMMARY DEBUG]   ${idx + 1}. Type: ${inc.type}, Severity: ${inc.severity}`);
+            console.log(`[GEN_COMP_SUMMARY DEBUG]      Description: ${inc.description?.substring(0, 100)}...`);
+          });
+        }
+      } else {
+        console.log(`[GEN_COMP_SUMMARY DEBUG] ⚠️ No inconsistencies content returned, using default`);
+        actualInconsistenciesContent = {
+          hasInconsistencies: false,
+          inconsistencies: []
+        };
+      }
+      
       // Collect citations from each result
       if (patientInfoResult?.citations) allCitations.push(...patientInfoResult.citations);
       if (diagnosesAndTreatmentsResult?.citations) allCitations.push(...diagnosesAndTreatmentsResult.citations);
@@ -801,8 +841,8 @@ export async function generateComprehensiveCaseSummary(
         // Key events timeline
         keyEvents: ensureValidKeyEvents(keyEventsTimelineResult?.content?.keyEvents || []),
 
-        // Inconsistencies - Start with the ones generated previously
-        medicalInconsistencies: inconsistenciesResult?.content || {
+        // Inconsistencies - Use the processed actualInconsistenciesContent
+        medicalInconsistencies: actualInconsistenciesContent || {
           hasInconsistencies: false,
           inconsistencies: []
         },
@@ -1570,6 +1610,9 @@ export async function generateInconsistenciesWithObject(
 }> {
   const logTag = 'INCONSISTENCIES';
   logger.info(`[VECTOR STORE - ${logTag}] Starting inconsistency analysis for patient ${silknotePatientUuid}`);
+  console.log(`[INCONSISTENCIES DEBUG] ===== START INCONSISTENCY ANALYSIS =====`);
+  console.log(`[INCONSISTENCIES DEBUG] Patient: ${silknotePatientUuid}`);
+  console.log(`[INCONSISTENCIES DEBUG] User: ${silknoteUserUuid}`);
   
   const inconsistencyPrompt = `You are an expert medical inconsistency detector. Your task is to carefully analyze ALL medical documents in the vector store to identify any contradictions, discrepancies, or inconsistencies in the patient's medical record.
 
@@ -1588,9 +1631,31 @@ For EACH inconsistency found:
 - Explain why this represents a potential problem
 - Assess the severity (Critical, High, Medium, Low)
 
-Return a JSON object that identifies whether inconsistencies exist and provides detailed analysis of each one found.
+**CRITICAL INSTRUCTIONS FOR YOUR RESPONSE:**
+1. You MUST return a JSON object containing your analysis results
+2. Do NOT return the schema definition itself
+3. Return ACTUAL DATA that matches the provided schema structure
+4. The response should contain your findings about inconsistencies in the patient's records
+5. If no inconsistencies are found, set hasInconsistencies to false and return an empty inconsistencies array
+6. ALWAYS include citations to the documents where you found the information
 
-IMPORTANT: Use the file search tool extensively to ensure you review ALL available documents. Leave no stone unturned in your analysis.`;
+Your response must be a valid JSON object with this exact structure:
+{
+  "hasInconsistencies": boolean (true if any inconsistencies found, false otherwise),
+  "inconsistencies": array of inconsistency objects (empty array if none found)
+}
+
+Each inconsistency object in the array must have:
+- type: the category of inconsistency
+- description: detailed explanation of what conflicts
+- severity: one of "Critical", "High", "Medium", or "Low"
+- relatedDocuments: array of documents involved in the inconsistency
+
+IMPORTANT: Use the file search tool extensively to ensure you review ALL available documents. Leave no stone unturned in your analysis.
+
+Return ONLY the JSON object with your findings. Do not include any other text or explanation outside the JSON.`;
+
+  console.log(`[INCONSISTENCIES DEBUG] Prompt length: ${inconsistencyPrompt.length}`);
 
   const inconsistencySchema = {
     type: 'object',
@@ -1651,7 +1716,10 @@ IMPORTANT: Use the file search tool extensively to ensure you review ALL availab
     required: ['hasInconsistencies', 'inconsistencies']
   };
 
+  console.log(`[INCONSISTENCIES DEBUG] Schema being sent:`, JSON.stringify(inconsistencySchema, null, 2));
+
   try {
+    console.log(`[INCONSISTENCIES DEBUG] Calling queryAssistantWithCitationsObject...`);
     const result = await queryAssistantWithCitationsObject(
       silknotePatientUuid,
       inconsistencyPrompt,
@@ -1660,20 +1728,99 @@ IMPORTANT: Use the file search tool extensively to ensure you review ALL availab
       silknoteUserUuid // Pass userUuid
     );
     
+    console.log(`[INCONSISTENCIES DEBUG] Raw result received:`, JSON.stringify(result, null, 2));
     logger.info(`[VECTOR STORE - ${logTag}] Inconsistency analysis completed for patient ${silknotePatientUuid}`);
+    
+    // Log what we actually received for debugging
+    logger.info(`[VECTOR STORE - ${logTag}] Received content type: ${typeof result.content}`);
+    console.log(`[INCONSISTENCIES DEBUG] Content type: ${typeof result.content}`);
+    
+    if (result.content) {
+      const contentKeys = Object.keys(result.content);
+      logger.info(`[VECTOR STORE - ${logTag}] Content keys: ${contentKeys.join(', ')}`);
+      console.log(`[INCONSISTENCIES DEBUG] Content keys: ${contentKeys.join(', ')}`);
+      console.log(`[INCONSISTENCIES DEBUG] Full content object:`, JSON.stringify(result.content, null, 2));
+      
+      // Check if we got the schema back instead of data
+      if (result.content.type === 'object' && result.content.properties) {
+        logger.error(`[VECTOR STORE - ${logTag}] ERROR: AI returned the schema definition instead of analysis results!`);
+        console.log(`[INCONSISTENCIES DEBUG] 🔴 ERROR: Schema returned instead of data!`);
+        console.log(`[INCONSISTENCIES DEBUG] Schema detection - has 'type': ${result.content.type}, has 'properties': ${!!result.content.properties}`);
+        
+        // Return default empty result
+        const fallbackResult = {
+          content: {
+            hasInconsistencies: false,
+            inconsistencies: []
+          },
+          citations: []
+        };
+        console.log(`[INCONSISTENCIES DEBUG] Returning fallback result:`, JSON.stringify(fallbackResult, null, 2));
+        console.log(`[INCONSISTENCIES DEBUG] ===== END INCONSISTENCY ANALYSIS (FALLBACK) =====`);
+        return fallbackResult;
+      }
+      
+      // Log the actual data we're working with
+      console.log(`[INCONSISTENCIES DEBUG] hasInconsistencies value: ${result.content.hasInconsistencies}`);
+      console.log(`[INCONSISTENCIES DEBUG] hasInconsistencies type: ${typeof result.content.hasInconsistencies}`);
+      
+      logger.info(`[VECTOR STORE - ${logTag}] Has inconsistencies: ${result.content.hasInconsistencies}`);
+      
+      if (result.content.inconsistencies !== undefined) {
+        console.log(`[INCONSISTENCIES DEBUG] inconsistencies field exists`);
+        console.log(`[INCONSISTENCIES DEBUG] inconsistencies is array: ${Array.isArray(result.content.inconsistencies)}`);
+        console.log(`[INCONSISTENCIES DEBUG] inconsistencies type: ${typeof result.content.inconsistencies}`);
+        
+        if (Array.isArray(result.content.inconsistencies)) {
+          console.log(`[INCONSISTENCIES DEBUG] Number of inconsistencies: ${result.content.inconsistencies.length}`);
+          logger.info(`[VECTOR STORE - ${logTag}] Number of inconsistencies: ${result.content.inconsistencies.length}`);
+          
+          // Log details of each inconsistency
+          result.content.inconsistencies.forEach((inc: any, index: number) => {
+            console.log(`[INCONSISTENCIES DEBUG] Inconsistency ${index + 1}:`);
+            console.log(`  - Type: ${inc.type}`);
+            console.log(`  - Severity: ${inc.severity}`);
+            console.log(`  - Description: ${inc.description?.substring(0, 100)}...`);
+            console.log(`  - Related documents: ${inc.relatedDocuments?.length || 0}`);
+          });
+        } else {
+          console.log(`[INCONSISTENCIES DEBUG] ⚠️ inconsistencies is not an array!`);
+          logger.warn(`[VECTOR STORE - ${logTag}] inconsistencies field is not an array`);
+        }
+      } else {
+        console.log(`[INCONSISTENCIES DEBUG] ⚠️ inconsistencies field is undefined!`);
+      }
+    } else {
+      console.log(`[INCONSISTENCIES DEBUG] ⚠️ result.content is null/undefined!`);
+    }
+    
+    console.log(`[INCONSISTENCIES DEBUG] Final result being returned:`, JSON.stringify(result, null, 2));
+    console.log(`[INCONSISTENCIES DEBUG] ===== END INCONSISTENCY ANALYSIS (SUCCESS) =====`);
+    
     return result;
     
   } catch (error) {
     logger.error(`[VECTOR STORE - ${logTag}] Error during inconsistency analysis for patient ${silknotePatientUuid}:`, error);
+    console.log(`[INCONSISTENCIES DEBUG] 🔴 ERROR caught in try-catch:`, error);
+    console.log(`[INCONSISTENCIES DEBUG] Error type: ${error?.constructor?.name}`);
+    console.log(`[INCONSISTENCIES DEBUG] Error message: ${error instanceof Error ? error.message : String(error)}`);
+    if (error instanceof Error && error.stack) {
+      console.log(`[INCONSISTENCIES DEBUG] Error stack:`, error.stack);
+    }
 
     // Return a fallback structure if the analysis fails
-    return {
+    const fallbackResult = {
       content: {
         hasInconsistencies: false,
         inconsistencies: []
       },
       citations: []
     };
+    
+    console.log(`[INCONSISTENCIES DEBUG] Returning error fallback:`, JSON.stringify(fallbackResult, null, 2));
+    console.log(`[INCONSISTENCIES DEBUG] ===== END INCONSISTENCY ANALYSIS (ERROR) =====`);
+    
+    return fallbackResult;
   }
 }
 
