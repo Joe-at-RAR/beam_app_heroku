@@ -958,8 +958,8 @@ export const documentService = {
       return null;
     }
 
-    // Note: Removed redundant patient access validation - the document query below already validates 
-    // user access by including both userUuid and patientUuid in the WHERE clause
+    // Note: Simplified database query for performance - route-level security validation should ensure
+    // user has access to the specified patient before calling this method
 
     console.log(`[PERF] About to call storageService.getDocument - ${new Date().toISOString()}`);
     const dbQueryStart = Date.now();

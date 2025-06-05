@@ -1012,6 +1012,8 @@ model SilknoteDocument {
   @@index([patientUuid])
   @@index([status])
   @@index([category])
+  @@index([clientFileId])
+  @@index([clientFileId, patientUuid])
 }
 
 // --- Above: table structure that also appears in VSRX --- 
