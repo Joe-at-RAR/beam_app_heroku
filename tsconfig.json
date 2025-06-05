@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-  "module": "CommonJS",
+    "module": "CommonJS",
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "strict": true,
@@ -38,6 +38,10 @@
     "node_modules",
     "dist",
     "**/*.spec.ts",
-    "**/*.test.ts"
+    "**/*.test.ts",
+    "src/tests/**/*",
+    "src/__tests__/**/*",
+    "**/setupTests.ts",
+    "**/setup.ts"
   ]
 } 
