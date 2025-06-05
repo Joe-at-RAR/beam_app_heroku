@@ -16,10 +16,6 @@ const defaultMedicalDocumentContent = (): MedicalDocument['content'] => ({
     // data: undefined, // if part of the type and optional
 });
 
-const documentWithPatientContextArgs = {
-    include: { patientFileset: { select: { silknoteUserUuid: true, patientName: true, patientDob: true } } }
-} satisfies Prisma.SilknoteDocumentArgs;
-
 // Type for a patient with all their (scalar) documents.
 const patientWithFullDocumentsArgs = {
     include: { documents: true } // true here includes all scalar fields of SilknoteDocument
