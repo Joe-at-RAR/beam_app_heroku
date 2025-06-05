@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import dotenv from 'dotenv';
 import path from 'path';
+import os from 'os';
 
 // Load environment variables from server/.env file
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
@@ -172,8 +173,10 @@ const config: Config = {
     maxFileSize: 50 * 1024 * 1024, // 50MB
     maxFiles: 500, // Maximum 500 files per batch
     allowedTypes: ['application/pdf'],
-    tempDir: path.join(process.cwd(), 'server', 'temp'),
-    outputDir: path.join(process.cwd(), 'server', 'data', 'documents')
+    // Use system temp directory in production (Azure-friendly), local path in development
+    tempDir: isProduction ? os.tmpdir() : path.join(process.cwd(), 'server', 'temp'),
+    // For Azure, use /home for persistent storage, local path in development  
+    outputDir: isProduction ? '/home/documents' : path.join(process.cwd(), 'server', 'data', 'documents')
   },
   storage: {
     type: env.STORAGE_TYPE,

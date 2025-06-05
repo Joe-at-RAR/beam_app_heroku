@@ -10,6 +10,8 @@
   "scripts": {
     "build": "npx tsc",
     "start": "node dist/src/index.js",
+    "start:prod": "npm run build && npm run start",
+    "postinstall": "npm run prisma:generate",
     "dev": "tsc-watch --onSuccess \"node dist/src/index.js\"",
     "test": "echo \"Tests temporarily disabled for deployment\" && exit 0",
     "prisma:generate": "prisma generate",
