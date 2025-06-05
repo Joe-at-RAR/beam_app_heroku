@@ -197,7 +197,7 @@ export function createAzureBlobFileAdapter(): FileStorageAdapter {
             this.containerClient = containerClient;
         }
 
-        _handleFile(_req: Express.  Request, file: Express.Multer.File, cb: (error?: any, info?: Partial<Express.Multer.File>) => void): void {
+        _handleFile(_req: Express.Request, file: Express.Multer.File, cb: (error?: any, info?: Partial<Express.Multer.File>) => void): void {
             if (!this.containerClient) {
                 return cb(new Error('Azure Blob adapter not initialized or container client not available.'));
             }
@@ -212,7 +212,6 @@ export function createAzureBlobFileAdapter(): FileStorageAdapter {
                 .then(response => {
                     logger.info(`Successfully streamed ${blobName} to Azure. ETag: ${response.etag}`);
                     cb(null, {
-                        destination: this.containerClient.containerName, 
                         filename: blobName, 
                         path: `${this.containerClient.containerName}/${blobName}`, 
                         etag: response.etag,

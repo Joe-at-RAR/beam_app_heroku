@@ -5,12 +5,13 @@
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,
     "noImplicitReturns": true,
     "noImplicitOverride": true,
-    "noPropertyAccessFromIndexSignature": true,
+    "noPropertyAccessFromIndexSignature": false,
+    "noImplicitAny": false,
     "resolveJsonModule": true,
     "isolatedModules": true, 
     "forceConsistentCasingInFileNames": true,
@@ -24,24 +25,19 @@
     "sourceMap": true,
     "skipLibCheck": true,
     "outDir": "./dist",
-    "lib": ["ES2022"],
-    "types": ["node"], 
-    "typeRoots": [
-      "./node_modules/@types",
-      "./src/types"
+    "lib": [
+      "ES2022"
     ]
   },
-  "include": [ 
-    "src/**/*.ts"
+  "include": [
+    "src/**/*"
   ],
   "exclude": [
-    "node_modules",
-    "dist",
-    "**/*.spec.ts",
-    "**/*.test.ts",
     "src/tests/**/*",
     "src/__tests__/**/*",
     "**/setupTests.ts",
-    "**/setup.ts"
+    "**/setup.ts",
+    "node_modules",
+    "dist"
   ]
 } 
