@@ -267,7 +267,14 @@ export function createPrismaAdapter(): DatabaseAdapter {
         },
 
         async getDocument(silknoteUserUuid: string, silknotePatientUuid: string, clientFileId: string): Promise<MedicalDocument | null> {
+            console.log(`[PERF] Prisma getDocument START - ${new Date().toISOString()} - clientFileId: ${clientFileId}`);
+            const startTime = Date.now();
+            
             logger.info(`[PRISMA] getDocument for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}, clientFileId: ${clientFileId}`);
+            
+            console.log(`[PERF] About to execute Prisma query - ${new Date().toISOString()}`);
+            const queryStart = Date.now();
+            
             try {
                 const prismaDoc = await prisma.silknoteDocument.findFirst({
                     where: {
@@ -277,9 +284,18 @@ export function createPrismaAdapter(): DatabaseAdapter {
                     },
                     ...documentWithPatientContextArgs // Use predefined args for include
                  });
-                return mapPrismaDocumentToMedicalDocument(prismaDoc);
+                 
+                const queryDuration = Date.now() - queryStart;
+                const totalDuration = Date.now() - startTime;
+                const result = mapPrismaDocumentToMedicalDocument(prismaDoc);
+                
+                console.log(`[PERF] Prisma query completed - ${new Date().toISOString()} - Query Duration: ${queryDuration}ms, Total Duration: ${totalDuration}ms, Found: ${result ? 'YES' : 'NO'}`);
+                
+                return result;
             } catch (error: any) {
+                const errorDuration = Date.now() - startTime;
                 logger.error(`[PRISMA] Error in getDocument for clientFileId '${clientFileId}':`, error);
+                console.log(`[PERF] Prisma query FAILED - ${new Date().toISOString()} - Duration: ${errorDuration}ms - Error: ${error.message}`);
                  return null;
              }
         },
@@ -671,7 +687,14 @@ export function createPrismaAdapter(): DatabaseAdapter {
         },
 
         async getDocument(silknoteUserUuid: string, silknotePatientUuid: string, clientFileId: string): Promise<MedicalDocument | null> {
+            console.log(`[PERF] Prisma getDocument START - ${new Date().toISOString()} - clientFileId: ${clientFileId}`);
+            const startTime = Date.now();
+            
             logger.info(`[PRISMA] getDocument for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}, clientFileId: ${clientFileId}`);
+            
+            console.log(`[PERF] About to execute Prisma query - ${new Date().toISOString()}`);
+            const queryStart = Date.now();
+            
             try {
                 const prismaDoc = await prisma.silknoteDocument.findFirst({
                     where: {
@@ -679,13 +702,22 @@ export function createPrismaAdapter(): DatabaseAdapter {
                         patientUuid: silknotePatientUuid,
                         patientFileset: { silknoteUserUuid: silknoteUserUuid },
                     },
-                    ...documentWithPatientContextArgs 
-                });
-                return mapPrismaDocumentToMedicalDocument(prismaDoc);
+                    ...documentWithPatientContextArgs // Use predefined args for include
+                 });
+                 
+                const queryDuration = Date.now() - queryStart;
+                const totalDuration = Date.now() - startTime;
+                const result = mapPrismaDocumentToMedicalDocument(prismaDoc);
+                
+                console.log(`[PERF] Prisma query completed - ${new Date().toISOString()} - Query Duration: ${queryDuration}ms, Total Duration: ${totalDuration}ms, Found: ${result ? 'YES' : 'NO'}`);
+                
+                return result;
             } catch (error: any) {
+                const errorDuration = Date.now() - startTime;
                 logger.error(`[PRISMA] Error in getDocument for clientFileId '${clientFileId}':`, error);
-                return null;
-            }
+                console.log(`[PERF] Prisma query FAILED - ${new Date().toISOString()} - Duration: ${errorDuration}ms - Error: ${error.message}`);
+                 return null;
+             }
         },
 
         async updateDocument(silknoteUserUuid: string, silknotePatientUuid: string, document: MedicalDocument): Promise<boolean> {
@@ -709,7 +741,7 @@ export function createPrismaAdapter(): DatabaseAdapter {
                     logger.warn(`[PRISMA] updateDocument: Doc ${docUuid} (client: ${document.clientFileId}) not found or not owned.`);
                     return false;
                 }
-
+                
                 const documentDataToUpdate: Omit<Prisma.SilknoteDocumentUpdateInput, 'patientFileset' | 'patientUuid'> = {
                     clientFileId: document.clientFileId,
                     originalName: document.originalName,

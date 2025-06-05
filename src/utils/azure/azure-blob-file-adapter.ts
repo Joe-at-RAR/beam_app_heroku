@@ -98,23 +98,34 @@ export function createAzureBlobFileAdapter(): FileStorageAdapter {
     };
 
     const getFileContent = async (fileRef: string): Promise<Buffer> => {
-        if (!containerClient) throw new Error('Azure Blob adapter not initialized.');
-        const containerName = config.storage.azureContainerName; // Use from config
-        logger.info(`Getting file content for "${fileRef}" from Azure Blob container "${containerName}".`);
-        clog(`⬇️  Downloading "${fileRef}" from container "${containerName}"…`);
-        const blockBlobClient: BlockBlobClient = containerClient.getBlockBlobClient(fileRef);
+        console.log(`[PERF] Azure blob getFileContent START - ${new Date().toISOString()} - fileRef: ${fileRef}`);
+        const startTime = Date.now();
+        
+        if (!containerClient) {
+            logger.error('Azure Blob adapter not initialized. Cannot get file content.');
+            throw new Error('Azure Blob adapter not initialized.');
+        }
+        logger.info(`[AZURE_BLOB_ADAPTER] ⬇️  Downloading "${fileRef}" from container "${containerClient.containerName}"…`);
+        
+        console.log(`[PERF] About to call Azure blob downloadToBuffer - ${new Date().toISOString()}`);
+        const azureDownloadStart = Date.now();
+        
         try {
-            const downloadBlockBlobResponse = await blockBlobClient.downloadToBuffer();
-            logger.info(`File "${fileRef}" content retrieved successfully from Azure Blob.`);
-            clog(`✅ Download of "${fileRef}" complete.`);
-            return downloadBlockBlobResponse;
+            const blobClient = containerClient.getBlobClient(fileRef);
+            const downloadResponse = await blobClient.downloadToBuffer();
+            
+            const azureDownloadDuration = Date.now() - azureDownloadStart;
+            const totalDuration = Date.now() - startTime;
+            
+            logger.info(`[AZURE_BLOB_ADAPTER] ✅ Download of "${fileRef}" complete.`);
+            console.log(`[PERF] Azure blob downloadToBuffer completed - ${new Date().toISOString()} - Azure Duration: ${azureDownloadDuration}ms, Total Duration: ${totalDuration}ms, Size: ${downloadResponse.length} bytes`);
+            
+            return downloadResponse;
         } catch (error: any) {
-            logger.error(`Failed to get file content for "${fileRef}" from Azure Blob:`, error);
-            clog(`❌ Download failed for "${fileRef}":`, error?.message || error);
-            if (error.statusCode === 404) {
-                throw new Error(`File not found in Azure Blob: ${fileRef}`);
-            }
-            throw new Error(`Azure Blob getFileContent failed: ${error.message}`);
+            const errorDuration = Date.now() - startTime;
+            logger.error(`[AZURE_BLOB_ADAPTER] ❌ Failed to download "${fileRef}":`, error);
+            console.log(`[PERF] Azure blob download FAILED - ${new Date().toISOString()} - Duration: ${errorDuration}ms - Error: ${error.message}`);
+            throw new Error(`Failed to download file: ${error.message}`);
         }
     };
 

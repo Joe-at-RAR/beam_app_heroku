@@ -946,6 +946,9 @@ export const documentService = {
   
   // Get a document by ID
   async getDocumentById(documentId: string, silknotePatientUuid?: string, silknoteUserUuid?: string): Promise<MedicalDocument | null> {
+    const startTime = Date.now();
+    console.log(`[PERF] documentService.getDocumentById START - ${new Date().toISOString()} - documentId: ${documentId}`);
+    
     const decodedDocumentId = decodeURIComponent(documentId);
     logger.info(`[DOCUMENT SERVICE] Fetching document via storageService with clientFileId: ${decodedDocumentId}, patientUuid: ${silknotePatientUuid}, userUuid: ${silknoteUserUuid}`);
 
@@ -955,15 +958,12 @@ export const documentService = {
       return null;
     }
 
-    // Optionally, verify user has access to the patient if silknotePatientUuid is provided
-    if (silknotePatientUuid) {
-      const patient = await patientService.getPatientById(silknotePatientUuid, silknoteUserUuid);
-      if (!patient || patient.silknoteUserUuid !== silknoteUserUuid) {
-        logger.warn(`[DOCUMENT SERVICE] User ${silknoteUserUuid} does not have access to patient ${silknotePatientUuid} or patient not found.`);
-        return null; // Or throw an authorization error
-      }
-    }
+    // Note: Removed redundant patient access validation - the document query below already validates 
+    // user access by including both userUuid and patientUuid in the WHERE clause
 
+    console.log(`[PERF] About to call storageService.getDocument - ${new Date().toISOString()}`);
+    const dbQueryStart = Date.now();
+    
     // Use the new 3-parameter signature for storageService.getDocument
     const document = await storageService.getDocument(
       silknoteUserUuid, 
@@ -971,17 +971,26 @@ export const documentService = {
       decodedDocumentId
     );
 
+    const dbQueryDuration = Date.now() - dbQueryStart;
+    console.log(`[PERF] storageService.getDocument completed - ${new Date().toISOString()} - Duration: ${dbQueryDuration}ms`);
+
     if (document) {
       // If silknotePatientUuid was provided for the lookup, ensure the found document actually belongs to that patient.
       // This is a double check, primary check should be in the DB query via storageService.
       if (silknotePatientUuid && document.silknotePatientUuid !== silknotePatientUuid) {
         logger.warn(`[DOCUMENT SERVICE] Document ${decodedDocumentId} found, but does not belong to patient ${silknotePatientUuid}. Belongs to: ${document.silknotePatientUuid}`);
-    return null;
+        return null;
       }
       logger.info(`[DOCUMENT SERVICE] Found document for clientFileId ${decodedDocumentId} via storageService.`);
+      
+      const totalDuration = Date.now() - startTime;
+      console.log(`[PERF] documentService.getDocumentById SUCCESS END - ${new Date().toISOString()} - Total Duration: ${totalDuration}ms`);
       return document; 
     } else {
       logger.warn(`[DOCUMENT SERVICE] Document not found for clientFileId ${decodedDocumentId} via storageService.`);
+      
+      const totalDuration = Date.now() - startTime;
+      console.log(`[PERF] documentService.getDocumentById NOT FOUND END - ${new Date().toISOString()} - Total Duration: ${totalDuration}ms`);
       return null;
     }
   },

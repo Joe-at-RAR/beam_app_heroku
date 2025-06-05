@@ -92,6 +92,9 @@ router.get('/:id/details', asyncHandler(async (req: Request, res: Response) => {
 
 // Regular document route - COMES AFTER the details route
 router.get('/:documentId', asyncHandler(async (req: Request, res: Response) => {
+  const requestStartTime = Date.now();
+  console.log(`[PERF] Documents route START - ${new Date().toISOString()} - ${req.method} ${req.path}`);
+  
   const { documentId } = req.params;
   const decodedDocumentId = decodeURIComponent(documentId);
   
@@ -103,22 +106,32 @@ router.get('/:documentId', asyncHandler(async (req: Request, res: Response) => {
   // Get patient UUID from header
   const patientUuid = getPatientUuid(req);
   if (!patientUuid) {
+    console.log(`[PERF] Documents route ERROR END - ${new Date().toISOString()} - Missing patient UUID - Duration: ${Date.now() - requestStartTime}ms`);
     return res.status(400).json({ 
       error: 'Missing or invalid x-silknote-patient-uuid header',
       message: 'Patient UUID must be provided in x-silknote-patient-uuid header' 
     });
   }
   
+  console.log(`[PERF] About to call documentService.getDocumentById - ${new Date().toISOString()}`);
+  const docServiceStart = Date.now();
+  
   // Get document with access validation
   const documentRecord = await documentService.getDocumentById(decodedDocumentId, patientUuid, userUuid);
+  
+  const docServiceDuration = Date.now() - docServiceStart;
+  console.log(`[PERF] documentService.getDocumentById completed - ${new Date().toISOString()} - Duration: ${docServiceDuration}ms`);
+  
   if (!documentRecord) {
     logger.warn(`Document not found or access denied: ${decodedDocumentId} for user ${userUuid} and patient ${patientUuid}`);
+    console.log(`[PERF] Documents route NOT FOUND END - ${new Date().toISOString()} - Duration: ${Date.now() - requestStartTime}ms`);
     return res.status(404).send('Document not found');
   }
   
   // Validate that the document belongs to the specified patient
   if (documentRecord.silknotePatientUuid !== patientUuid) {
     logger.warn(`Access denied: Document ${decodedDocumentId} belongs to patient ${documentRecord.silknotePatientUuid}, not ${patientUuid}`);
+    console.log(`[PERF] Documents route ACCESS DENIED END - ${new Date().toISOString()} - Duration: ${Date.now() - requestStartTime}ms`);
     return res.status(403).send('Access denied');
   }
   
@@ -127,12 +140,24 @@ router.get('/:documentId', asyncHandler(async (req: Request, res: Response) => {
   // --- If we are in SILKNOTE (Azure Blob) mode ---
   if (config.storage.type !== 'LOCAL') {
     try {
+      console.log(`[PERF] About to call storageService.getFileContent (Azure Blob) - ${new Date().toISOString()}`);
+      const blobDownloadStart = Date.now();
+      
       const buffer = await storageService.getFileContent(filePath);
+      
+      const blobDownloadDuration = Date.now() - blobDownloadStart;
+      console.log(`[PERF] Azure Blob download completed - ${new Date().toISOString()} - Duration: ${blobDownloadDuration}ms`);
+      
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `inline; filename="${documentRecord.originalName || path.basename(filePath)}"`);
+      
+      const totalRequestDuration = Date.now() - requestStartTime;
+      console.log(`[PERF] Documents route SUCCESS END (Azure) - ${new Date().toISOString()} - Total Duration: ${totalRequestDuration}ms`);
+      
       return res.end(buffer);
     } catch (err) {
       logger.error('Error retrieving blob for path:', { filePath, error: err });
+      console.log(`[PERF] Documents route BLOB ERROR END - ${new Date().toISOString()} - Duration: ${Date.now() - requestStartTime}ms`);
       return res.status(404).send('Stored file not found in blob storage');
     }
   }

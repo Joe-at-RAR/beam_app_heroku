@@ -198,8 +198,11 @@ export class StorageService {
   // --- Modified File Operations for VSRX ---
 
   async getFileContent(fileRef: string, options: { isVSRXPath?: boolean } = {}): Promise<Buffer> {
+    const startTime = Date.now();
+    console.log(`[PERF] storageService.getFileContent START - ${new Date().toISOString()} - fileRef: ${fileRef}`);
+    
     if (!this.initialized) throw new Error('Storage service not initialized');
-
+    
     if (process.env['VSRX_MODE'] === 'true' && options.isVSRXPath) {
       // **VSRX PATH VALIDATION**
       const isValid = await this.isValidVSRXPath(fileRef);
@@ -209,15 +212,33 @@ export class StorageService {
       const absoluteFilePath = path.resolve(fileRef); // Resolve path again for reading
       logInfo(`VSRX Mode: Reading validated path "${absoluteFilePath}"`);
       try {
+        console.log(`[PERF] About to read file directly (VSRX mode) - ${new Date().toISOString()}`);
+        const fsReadStart = Date.now();
+        
         // Attempt reading directly using fs after validation
-        return await fs.promises.readFile(absoluteFilePath);
+        const result = await fs.promises.readFile(absoluteFilePath);
+        
+        const fsReadDuration = Date.now() - fsReadStart;
+        const totalDuration = Date.now() - startTime;
+        console.log(`[PERF] Direct file read completed (VSRX) - ${new Date().toISOString()} - FS Read Duration: ${fsReadDuration}ms, Total Duration: ${totalDuration}ms`);
+        
+        return result;
       } catch (readError) {
         logError(`VSRX: Error reading validated path "${absoluteFilePath}"`, readError as Error);
         throw new Error(`Failed to read file from validated path: ${absoluteFilePath}`);
       }
     } else {
       // Non-VSRX mode or non-VSRX path call - use the configured fileAdapter as usual
-      return this.fileAdapter.getFileContent(fileRef);
+      console.log(`[PERF] About to call fileAdapter.getFileContent - ${new Date().toISOString()}`);
+      const fileAdapterStart = Date.now();
+      
+      const result = await this.fileAdapter.getFileContent(fileRef);
+      
+      const fileAdapterDuration = Date.now() - fileAdapterStart;
+      const totalDuration = Date.now() - startTime;
+      console.log(`[PERF] fileAdapter.getFileContent completed - ${new Date().toISOString()} - File Adapter Duration: ${fileAdapterDuration}ms, Total Duration: ${totalDuration}ms`);
+      
+      return result;
     }
   }
 
@@ -389,6 +410,9 @@ export class StorageService {
     return this.dbAdapter.saveDocument(silknoteUserUuid, silknotePatientUuid, document);
   }
   async getDocument(silknoteUserUuid: string, silknotePatientUuid: string, documentId: string): Promise<MedicalDocument | null> {
+    const startTime = Date.now();
+    console.log(`[PERF] storageService.getDocument START - ${new Date().toISOString()} - documentId: ${documentId}`);
+    
     if (!this.initialized) throw new Error('Storage service not initialized');
     
     let contextMessage = `documentId: ${documentId}`;
@@ -403,8 +427,18 @@ export class StorageService {
     } else {
       logInfo(`storageService.getDocument called with ${contextMessage}`);
     }
+    
+    console.log(`[PERF] About to call dbAdapter.getDocument - ${new Date().toISOString()}`);
+    const dbAdapterStart = Date.now();
+    
     // Pass both arguments to the adapter. The adapter will decide how to use them.
-    return this.dbAdapter.getDocument(silknoteUserUuid, silknotePatientUuid, documentId);
+    const result = await this.dbAdapter.getDocument(silknoteUserUuid, silknotePatientUuid, documentId);
+    
+    const dbAdapterDuration = Date.now() - dbAdapterStart;
+    const totalDuration = Date.now() - startTime;
+    console.log(`[PERF] dbAdapter.getDocument completed - ${new Date().toISOString()} - DB Duration: ${dbAdapterDuration}ms, Total Duration: ${totalDuration}ms`);
+    
+    return result;
   }
   async updateDocument(silknoteUserUuid: string, silknotePatientUuid: string, document: MedicalDocument): Promise<boolean> {
     if (!this.initialized) throw new Error('Storage service not initialized');

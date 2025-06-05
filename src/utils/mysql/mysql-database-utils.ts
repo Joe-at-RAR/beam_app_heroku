@@ -184,13 +184,29 @@ export function createMySqlDatabaseAdapter(): DatabaseAdapter {
     },
 
     async getDocument(silknoteUserUuid: string, silknotePatientUuid: string, clientFileId: string): Promise<MedicalDocument | null> {
+        console.log(`[PERF] MySQL getDocument START - ${new Date().toISOString()} - clientFileId: ${clientFileId}`);
+        const startTime = Date.now();
+        
         if (!isInitialized) throw new Error('Adapter not initialized');
         logInfo('Getting document', { clientFileId, silknotePatientUuid, silknoteUserUuid });
         const sql = 'SELECT *, silknoteDocumentUuid as clientFileId FROM Document WHERE silknoteDocumentUuid = ? AND patientUuid = ?'; 
+        
+        console.log(`[PERF] About to execute MySQL query - ${new Date().toISOString()}`);
+        const queryStart = Date.now();
+        
         try {
             const rows = await executeQuery<RowDataPacket[]>(sql, [clientFileId, silknotePatientUuid]);
-            return rows.length > 0 ? mapDocumentRow(rows[0]) : null;
+            
+            const queryDuration = Date.now() - queryStart;
+            const totalDuration = Date.now() - startTime;
+            const result = rows.length > 0 ? mapDocumentRow(rows[0]) : null;
+            
+            console.log(`[PERF] MySQL query completed - ${new Date().toISOString()} - Query Duration: ${queryDuration}ms, Total Duration: ${totalDuration}ms, Found: ${result ? 'YES' : 'NO'}`);
+            
+            return result;
         } catch (error) {
+            const errorDuration = Date.now() - startTime;
+            console.log(`[PERF] MySQL query FAILED - ${new Date().toISOString()} - Duration: ${errorDuration}ms - Error: ${error}`);
             return null;
         }
     },
