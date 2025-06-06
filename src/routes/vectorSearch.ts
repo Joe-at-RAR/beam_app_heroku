@@ -6,6 +6,9 @@ import config from '../config'
 import * as patientService from '../services/patientService'
 import { findEnhancedPrompt } from '../shared/query-mappings'
 import { getUserUuid } from '../middleware/auth'
+import { storageService } from '../utils/storage'
+import * as vectorStore from '../services/vectorStore'
+import { VectorStoreError } from '../shared/types'
 
 const router: Router = Router()
 
@@ -312,6 +315,113 @@ router.post('/:silknotePatientUuid/query-full', async (req, res) => {
 
     // Get user UUID from auth middleware
     const silknoteUserUuid = getUserUuid(req);
+
+    // Validate vector store sync before proceeding
+    console.log(`[ROUTE - /query-full] Validating vector store sync for patient ${silknotePatientUuid}`);
+    const validationResult = await storageService.validateVectorStoreSync(silknoteUserUuid, silknotePatientUuid);
+    
+    if (!validationResult.isValid) {
+      console.error(`[ROUTE - /query-full] Vector store validation failed for patient ${silknotePatientUuid}:`, validationResult.errors);
+      
+      // Check if there are missing files
+      if (validationResult.missingFiles.length > 0) {
+        console.log(`[ROUTE - /query-full] Found ${validationResult.missingFiles.length} missing files in vector store. Attempting to sync...`);
+        
+        // Get the missing documents
+        const missingDocuments: Array<{
+          clientFileId: string;
+          path: string;
+          name: string;
+        }> = [];
+        for (const clientFileId of validationResult.missingFiles) {
+          const doc = await storageService.getDocument(silknoteUserUuid, silknotePatientUuid, clientFileId);
+          if (doc && doc.storedPath) {
+            missingDocuments.push({
+              clientFileId: doc.clientFileId,
+              path: doc.storedPath,
+              name: doc.originalName
+            });
+          }
+        }
+
+        if (missingDocuments.length > 0) {
+          try {
+            // Attempt to add missing files to vector store
+            console.log(`[ROUTE - /query-full] Attempting to add ${missingDocuments.length} missing files to vector store`);
+            
+            // Create File-like objects for the vector store
+            const files: any[] = [];
+            for (const doc of missingDocuments) {
+              try {
+                // Load the file content
+                const fileBuffer = await storageService.getFileContent(doc.path);
+                
+                // Create a File-like object that processDocumentsForVectorStore can handle
+                // Using the same pattern as in documentService.ts
+                const filename = `${doc.clientFileId}.pdf`;
+                const file = new File([fileBuffer], filename, {
+                  type: 'application/pdf',
+                  lastModified: Date.now()
+                });
+                
+                files.push(file);
+              } catch (fileError) {
+                console.error(`[ROUTE - /query-full] Failed to load file ${doc.clientFileId}:`, fileError);
+              }
+            }
+
+            if (files.length > 0) {
+              // Process documents for vector store
+              const processResult = await vectorStore.processDocumentsForVectorStore(
+                files,
+                silknotePatientUuid,
+                silknoteUserUuid
+              );
+
+              if (processResult.success) {
+                console.log(`[ROUTE - /query-full] Successfully synced ${files.length} files to vector store`);
+                // Clear any previous errors
+                await storageService.updatePatientVectorStoreErrors(silknoteUserUuid, silknotePatientUuid, []);
+              } else {
+                throw new Error('Failed to process documents for vector store');
+              }
+            } else {
+              throw new Error('Could not load any of the missing files');
+            }
+          } catch (syncError) {
+            console.error(`[ROUTE - /query-full] Failed to sync missing files:`, syncError);
+            
+            // Update errors in database
+            const error: VectorStoreError = {
+              timestamp: new Date().toISOString(),
+              errorType: 'SYNC_FAILED',
+              message: 'Failed to sync missing files to vector store',
+              details: {
+                missingFiles: validationResult.errors[0]?.details?.missingFiles || [],
+                attemptedSync: true,
+                syncErrors: [syncError instanceof Error ? syncError.message : 'Unknown sync error']
+              }
+            };
+            
+            await storageService.updatePatientVectorStoreErrors(silknoteUserUuid, silknotePatientUuid, [error]);
+            
+            // Return error to user
+            return res.status(500).json({ 
+              error: 'Vector store is out of sync with document database. Please contact support.',
+              details: 'Some documents could not be added to the search index.'
+            });
+          }
+        }
+      } else {
+        // No missing files but validation still failed
+        await storageService.updatePatientVectorStoreErrors(silknoteUserUuid, silknotePatientUuid, validationResult.errors);
+        
+        return res.status(500).json({ 
+          error: 'Vector store validation failed. Please contact support.',
+          details: validationResult.errors[0]?.message || 'Unknown validation error'
+        });
+      }
+    }
 
     // Determine the actual prompt to use
     const userQuery = query.toString();

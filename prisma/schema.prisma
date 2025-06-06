@@ -952,7 +952,9 @@ model SilknotePatientFileset {
 
   // Link back to the owning User
   silknoteUserUuid              String 
- user                User      @relation(fields: [silknoteUserUuid], references: [silknoteUserUuid])
+  user                User      @relation(fields: [silknoteUserUuid], references: [silknoteUserUuid])
+  activatedUse Boolean @default(false)
+  activatedUseTime DateTime?
 
   // Store patient context directly here, mirroring PatientDetails
   patientName         String? 
@@ -968,6 +970,8 @@ model SilknotePatientFileset {
 
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
+
+  errors Json? 
 
   // Relation to documents associated with this patient UUID
   documents           SilknoteDocument[]

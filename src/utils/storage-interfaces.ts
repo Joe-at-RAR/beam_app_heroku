@@ -56,6 +56,11 @@ export interface DatabaseAdapter {
   // Alert Method - scoped by user, patient, and specific document (using its DB UUID)
   acknowledgeDocumentAlert(silknoteUserUuid: string, silknotePatientUuid: string, silknoteDocumentUuid: string, alertType: DocumentAlertType): Promise<boolean>;
 
+  // Vector Store validation and error handling methods
+  getPatientVectorStore?(silknoteUserUuid: string, silknotePatientUuid: string): Promise<any | null>;
+  updatePatientVectorStoreErrors?(silknoteUserUuid: string, silknotePatientUuid: string, errors: any[]): Promise<boolean>;
+  validateVectorStoreSync?(silknoteUserUuid: string, silknotePatientUuid: string): Promise<{ isValid: boolean; missingFiles: string[]; errors: any[] }>;
+
   // Queue/VSRX methods - scoping to be determined by their exact function.
   // If they list or modify documents, they need scoping.
   // If truly global admin functions, they might not. For now, let's assume scoping if data is not global.

@@ -164,6 +164,8 @@ export interface PatientDetails {
   vectorStore: PatientVectorStore | null; 
   caseSummary: CaseSummaryApiResponse | null; 
   summaryGenerationCount?: number;
+  activatedUse?: boolean;  // Indicates if the patient fileset has been activated for use
+  activatedUseTime?: string | null;  // ISO timestamp of when the patient fileset was activated
 }
 
 // File Handling
@@ -432,6 +434,22 @@ export interface SummaryCitation {
   endIndex?: number;
   markerId?: string; // Added for embedding
   originalAnnotationText?: string; // Store the original marker text for replacement
+}
+
+// Add this interface near other patient-related types
+export interface VectorStoreError {
+  timestamp: string;
+  errorType: 'MISSING_FILE' | 'SYNC_FAILED' | 'VALIDATION_FAILED' | 'OTHER';
+  message: string;
+  details?: {
+    missingFiles?: Array<{
+      clientFileId: string;
+      fileName: string;
+      documentUuid?: string;
+    }>;
+    attemptedSync?: boolean;
+    syncErrors?: string[];
+  };
 }
 
 

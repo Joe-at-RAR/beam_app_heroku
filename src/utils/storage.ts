@@ -404,6 +404,38 @@ export class StorageService {
     return false;
   }
 
+  // --- Vector Store Validation Methods ---
+  async getPatientVectorStore(silknoteUserUuid: string, silknotePatientUuid: string): Promise<any | null> {
+    if (!this.initialized) throw new Error('Storage service not initialized');
+    if (typeof (this.dbAdapter as any).getPatientVectorStore === 'function') {
+      return (this.dbAdapter as any).getPatientVectorStore(silknoteUserUuid, silknotePatientUuid);
+    }
+    logError('getPatientVectorStore not supported by the current DB adapter.');
+    return null;
+  }
+
+  async updatePatientVectorStoreErrors(silknoteUserUuid: string, silknotePatientUuid: string, errors: any[]): Promise<boolean> {
+    if (!this.initialized) throw new Error('Storage service not initialized');
+    if (typeof (this.dbAdapter as any).updatePatientVectorStoreErrors === 'function') {
+      return (this.dbAdapter as any).updatePatientVectorStoreErrors(silknoteUserUuid, silknotePatientUuid, errors);
+    }
+    logError('updatePatientVectorStoreErrors not supported by the current DB adapter.');
+    return false;
+  }
+
+  async validateVectorStoreSync(silknoteUserUuid: string, silknotePatientUuid: string): Promise<{ isValid: boolean; missingFiles: string[]; errors: any[] }> {
+    if (!this.initialized) throw new Error('Storage service not initialized');
+    if (typeof (this.dbAdapter as any).validateVectorStoreSync === 'function') {
+      return (this.dbAdapter as any).validateVectorStoreSync(silknoteUserUuid, silknotePatientUuid);
+    }
+    logError('validateVectorStoreSync not supported by the current DB adapter.');
+    return { isValid: false, missingFiles: [], errors: [{ 
+      timestamp: new Date().toISOString(),
+      errorType: 'VALIDATION_FAILED',
+      message: 'Vector store validation not supported by current database adapter'
+    }] };
+  }
+
   // --- Standard DB Operations (Delegate) ---
   async saveDocument(silknoteUserUuid: string, silknotePatientUuid: string, document: MedicalDocument): Promise<boolean> {
     if (!this.initialized) throw new Error('Storage service not initialized');

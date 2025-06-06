@@ -271,36 +271,6 @@ app.use('/api/documents', documentReprocessRouter); // Add reprocess endpoint
 app.use('/api/vector-search', vectorSearchRouter);
 app.use('/api/alerts', documentAlertsRouter);
 
-app.get('/api/patients/:silknotePatientUuid', async (req, res) => {
-  const { silknotePatientUuid } = req.params;
-  
-  try {
-    // Extract silknoteUserUuid from authenticated user
-    const silknoteUserUuid = req.user!.id; // We know user exists because of requireAuth middleware
-    
-    const patient = await getPatientById(silknotePatientUuid, silknoteUserUuid);
-    
-    if (!patient) {
-      return res.status(404).json({ error: 'Patient not found' });
-    }
-    
-    // Ensure summaryGenerationCount is initialized
-    if (patient.summaryGenerationCount === undefined) {
-      patient.summaryGenerationCount = 0;
-    }
-    
-    // Return a sanitized version of the patient (without sensitive data)
-    return res.status(200).json({
-      id: patient.silknotePatientUuid,
-      name: patient.name,
-      summaryGenerationCount: patient.summaryGenerationCount
-    });
-  } catch (error) {
-    console.error(`Error fetching patient details: ${error}`);
-    return res.status(500).json({ error: 'Failed to fetch patient details' });
-  }
-});
-
 app.get('/api/patients/:silknotePatientUuid/case-summary', async (req, res) => {
   const { silknotePatientUuid } = req.params;
   

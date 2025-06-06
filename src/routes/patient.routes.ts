@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import { v4 as uuidv4 } from 'uuid'
 import cors from 'cors'
+import crypto from 'crypto'
 
 import config from '../config'
 import { MedicalDocument, DocumentType, PatientDetails, DocumentAlertType } from '../shared/types'
@@ -13,6 +14,17 @@ import { io } from '../socket'
 import { storageService } from '../utils/storage'
 import { asyncHandler } from "../utils/errorHandlers";
 import { createLogger } from '../utils/logger';
+
+// Extend Express Request type to include user information
+declare global {
+  namespace Express {
+    interface Request {
+      user?: {
+        id: string;
+      };
+    }
+  }
+}
 
 const router: Router = Router()
 
@@ -101,19 +113,58 @@ router.get('/', async (req, res) => {
 router.get('/:silknotePatientUuid', async (req, res) => {
   const silknotePatientUuid = req.params.silknotePatientUuid
   
-  // Get user UUID from headers
-  const silknoteUserUuid = req.headers['x-silknote-user-uuid'] as string || req.headers['silknote-user-uuid'] as string;
+  // Get user UUID from either middleware (req.user) or headers
+  // This ensures compatibility with both authentication methods
+  let silknoteUserUuid: string | undefined;
+  
+  // First check if we have req.user from middleware
+  if (req.user?.id) {
+    silknoteUserUuid = req.user.id;
+  } else {
+    // Fall back to header-based authentication
+    silknoteUserUuid = req.headers['x-silknote-user-uuid'] as string || req.headers['silknote-user-uuid'] as string;
+  }
   
   if (!silknoteUserUuid) {
-    return res.status(400).json({ error: 'Missing required header: silknote-user-uuid' });
+    return res.status(401).json({ error: 'Missing authentication: x-silknote-user-uuid header or authenticated user required' });
   }
   
   try {
+    // Get the complete patient data including fileSet
     const patient = await patientService.getPatientById(silknotePatientUuid, silknoteUserUuid)
     if (!patient) return res.status(404).json({ error: 'Patient not found' })
-    return res.json({ patient })
+    
+    // Ensure summaryGenerationCount is initialized
+    if (patient.summaryGenerationCount === undefined) {
+      patient.summaryGenerationCount = 0;
+    }
+    
+    // Return the complete combined response that includes:
+    // 1. All patient details
+    // 2. The fileSet (which replaces the separate files call)
+    // 3. Additional metadata from the files endpoint
+    return res.json({ 
+      // Patient details (from the original patient endpoint)
+      patient: {
+        id: patient.silknotePatientUuid,
+        silknotePatientUuid: patient.silknotePatientUuid,
+        name: patient.name,
+        dateOfBirth: patient.dateOfBirth,
+        gender: patient.gender,
+        summaryGenerationCount: patient.summaryGenerationCount,
+        fileSet: patient.fileSet || [],
+        caseSummary: patient.caseSummary,
+        vectorStore: patient.vectorStore,
+        activatedUse: patient.activatedUse ?? false,
+        activatedUseTime: patient.activatedUseTime
+      },
+      // Additional metadata from the files endpoint
+      files: patient.fileSet || [],  // For backward compatibility
+      timestamp: new Date().toISOString(),
+      count: (patient.fileSet || []).length
+    })
   } catch (error) {
-    console.error(error)
+    console.error('Error fetching patient details:', error)
     return res.status(500).json({ error: 'Error fetching patient details' })
   }
 })
@@ -590,5 +641,108 @@ router.delete('/:patientId/case-summary', asyncHandler(async (req: Request, res:
         return res.status(500).json({ error: 'Internal server error while clearing case summary.' });
     }
 }));
+
+// POST /:silknotePatientUuid/activate - Set activatedUse status for a patient
+router.post('/:silknotePatientUuid/activate', async (req: Request, res: Response) => {
+  const { silknotePatientUuid } = req.params
+  const { activatedUse, 'user-key': userKey } = req.body
+  
+  // Validate request body
+  if (typeof activatedUse !== 'boolean' || !userKey) {
+    return res.status(400).json({ 
+      error: 'Invalid request body',
+      details: {
+        activatedUse: typeof activatedUse !== 'boolean' ? 'Must be a boolean' : undefined,
+        'user-key': !userKey ? 'Required' : undefined
+      }
+    })
+  }
+  
+  // Get user UUID from either middleware (req.user) or headers
+  let silknoteUserUuid: string | undefined;
+  
+  if (req.user?.id) {
+    silknoteUserUuid = req.user.id;
+  } else {
+    silknoteUserUuid = req.headers['x-silknote-user-uuid'] as string || req.headers['silknote-user-uuid'] as string;
+  }
+  
+  if (!silknoteUserUuid) {
+    return res.status(401).json({ error: 'Missing authentication: x-silknote-user-uuid header or authenticated user required' });
+  }
+  
+  // Validate user-key
+  // Expected format: sha256(`${silknoteUserUuid}{${silknoteUserUuid}}`)
+  const expectedKey = crypto
+    .createHash('sha256')
+    .update(`${silknoteUserUuid}{${silknoteUserUuid}}`)
+    .digest('hex');
+  
+  if (userKey !== expectedKey) {
+    logger.warn(`Invalid user-key provided for patient ${silknotePatientUuid} by user ${silknoteUserUuid}`);
+    return res.status(403).json({ error: 'Invalid user-key' });
+  }
+  
+  try {
+    // Verify patient exists and belongs to user
+    const patient = await patientService.getPatientById(silknotePatientUuid, silknoteUserUuid)
+    if (!patient) {
+      return res.status(404).json({ error: 'Patient not found' })
+    }
+    
+    // Check if already activated - prevent deactivation
+    if (patient.activatedUse === true && activatedUse === false) {
+      logger.warn(`Attempted to deactivate patient ${silknotePatientUuid} which is already activated`)
+      return res.status(400).json({ 
+        error: 'Cannot deactivate patient',
+        message: 'Once activated, a patient fileset cannot be deactivated'
+      })
+    }
+    
+    // Check if already in desired state
+    if (patient.activatedUse === activatedUse) {
+      return res.json({ 
+        success: true,
+        silknotePatientUuid,
+        activatedUse,
+        activatedUseTime: patient.activatedUseTime,
+        message: `Patient already has activatedUse status of ${activatedUse}`
+      })
+    }
+    
+    // Update activatedUse field and timestamp
+    const updateData: Partial<PatientDetails> = {
+      silknotePatientUuid,
+      silknoteUserUuid,
+      activatedUse
+    }
+    
+    // Only set activatedUseTime when activating (not when attempting to deactivate)
+    if (activatedUse === true) {
+      updateData.activatedUseTime = new Date().toISOString()
+    }
+    
+    const updateSuccess = await patientService.updatePatient(updateData)
+    
+    if (!updateSuccess) {
+      logger.error(`Failed to update activatedUse for patient ${silknotePatientUuid}`)
+      return res.status(500).json({ error: 'Failed to update patient' })
+    }
+    
+    logger.info(`Successfully updated activatedUse to ${activatedUse} for patient ${silknotePatientUuid} by user ${silknoteUserUuid}`)
+    
+    return res.json({ 
+      success: true,
+      silknotePatientUuid,
+      activatedUse,
+      activatedUseTime: updateData.activatedUseTime || patient.activatedUseTime,
+      message: `Patient activatedUse status updated to ${activatedUse}`
+    })
+    
+  } catch (error) {
+    logger.error('Error updating patient activatedUse:', error)
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
 
 export default router
