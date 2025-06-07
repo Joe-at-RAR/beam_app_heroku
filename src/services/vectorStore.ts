@@ -100,8 +100,16 @@ export async function processDocumentsForVectorStore(
     }
 
     // Process files
-    const processedFilesList = [];
-    const fileIdMappings = [];
+    const processedFilesList: Array<{
+      fileName: string
+      fileId: string
+      status: string
+    }> = [];
+    const fileIdMappings: Array<{
+      openaiFileId: string
+      clientFileId: string
+      fileName: string
+    }> = [];
     
     for (const file of files) {
 

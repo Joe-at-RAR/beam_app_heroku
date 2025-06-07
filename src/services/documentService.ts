@@ -391,7 +391,7 @@ async function processDocument(input: QueuedDocument): Promise<void> {
               //console.log(`[PROCESSING] Extracting page images for document ${documentId}`);
               
               // Only load buffer when needed for image extraction
-              let imageExtractionBuffer = null;
+              let imageExtractionBuffer: Buffer | null = null;
               try {
                 // Get page count if available, otherwise use 1
                 const pageCount = partialDoc.pageCount || 1;
@@ -435,7 +435,7 @@ async function processDocument(input: QueuedDocument): Promise<void> {
             }
             
             // Now load buffer separately for document analysis
-            let analysisBuffer = null;
+            let analysisBuffer: Buffer | null = null;
             try {
            //   console.log(`[PROCESSING] Loading buffer for document analysis: ${documentId}`);
               analysisBuffer = await storageService.getFileContent(filePath);
@@ -560,7 +560,7 @@ async function processDocument(input: QueuedDocument): Promise<void> {
           // Process for vector store
           try {
             // Load buffer separately just for vector store processing
-            let vectorBuffer = null;
+            let vectorBuffer: Buffer | null = null;
             try {
               // console.log(`[PROCESSING] Loading buffer for vector store processing: ${documentId}`);
               vectorBuffer = await storageService.getFileContent(filePath);

@@ -275,7 +275,7 @@ export function createPrismaAdapter(): DatabaseAdapter {
             
             try {
                 // Try to use unique lookup first if clientFileId is actually the document UUID
-                let prismaDoc = null;
+                let prismaDoc: SilknoteDocument | null = null;
                 
                 // First attempt: check if clientFileId is actually a document UUID (faster unique lookup)
                 if (clientFileId && clientFileId.length > 20) { // UUID-like format
