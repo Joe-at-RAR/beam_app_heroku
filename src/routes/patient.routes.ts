@@ -14,6 +14,7 @@ import { io } from '../socket'
 import { storageService } from '../utils/storage'
 import { asyncHandler } from "../utils/errorHandlers";
 import { createLogger } from '../utils/logger';
+import { getUserUuid } from '../middleware/auth';
 
 // Extend Express Request type to include user information
 declare global {
@@ -113,22 +114,13 @@ router.get('/', async (req, res) => {
 router.get('/:silknotePatientUuid', async (req, res) => {
   const silknotePatientUuid = req.params.silknotePatientUuid
   
-  // Get user UUID from either middleware (req.user) or headers
-  // This ensures compatibility with both authentication methods
-  let silknoteUserUuid: string | undefined;
-  
-  // First check if we have req.user from middleware
-  if (req.user?.id) {
-    silknoteUserUuid = req.user.id;
-  } else {
-    // Fall back to header-based authentication
-    silknoteUserUuid = req.headers['x-silknote-user-uuid'] as string || req.headers['silknote-user-uuid'] as string;
-  }
+  // Get user UUID from auth middleware (aligned with other endpoints)
+  const silknoteUserUuid = getUserUuid(req);
   
   console.log(`[DEBUG PATIENT ROUTE] GET /${silknotePatientUuid} - User UUID extraction:`, {
+    fromGetUserUuid: silknoteUserUuid,
     fromReqUser: req.user?.id,
     fromHeaderXSilknote: req.headers['x-silknote-user-uuid'],
-    fromHeaderSilknote: req.headers['silknote-user-uuid'],
     finalUserUuid: silknoteUserUuid,
     finalUserUuidLength: silknoteUserUuid?.length
   });
@@ -192,12 +184,12 @@ router.get('/:silknotePatientUuid/files', async (req, res) => {
       return res.status(400).json({ error: 'Patient ID is required' })
     }
     
-    // Get user UUID from headers
-    const silknoteUserUuid = req.headers['x-silknote-user-uuid'] as string || req.headers['silknote-user-uuid'] as string;
+    // Get user UUID from auth middleware (aligned with other endpoints)
+    const silknoteUserUuid = getUserUuid(req);
     
     console.log(`[DEBUG FILES ROUTE] GET /${silknotePatientUuid}/files - User UUID extraction:`, {
+      fromGetUserUuid: silknoteUserUuid,
       fromHeaderXSilknote: req.headers['x-silknote-user-uuid'],
-      fromHeaderSilknote: req.headers['silknote-user-uuid'],
       finalUserUuid: silknoteUserUuid,
       finalUserUuidLength: silknoteUserUuid?.length
     });
@@ -292,8 +284,8 @@ router.post(
       return res.status(400).json({ success: false, error: 'No files uploaded' });
     }
 
-    // Get user UUID from headers
-    const silknoteUserUuid = req.headers['x-silknote-user-uuid'] as string || req.headers['silknote-user-uuid'] as string;
+    // Get user UUID from auth middleware (aligned with other endpoints)
+    const silknoteUserUuid = getUserUuid(req);
     
     if (!silknoteUserUuid) {
       return res.status(400).json({ success: false, error: 'Missing required header: silknote-user-uuid' });
@@ -442,8 +434,8 @@ router.post('/', async (req, res) => {
 router.delete('/:silknotePatientUuid', async (req, res) => {
   const { silknotePatientUuid } = req.params
   
-  // Get user UUID from headers
-  const silknoteUserUuid = req.headers['x-silknote-user-uuid'] as string || req.headers['silknote-user-uuid'] as string;
+  // Get user UUID from auth middleware (aligned with other endpoints)
+  const silknoteUserUuid = getUserUuid(req);
   
   if (!silknoteUserUuid) {
     return res.status(400).json({ error: 'Missing required header: silknote-user-uuid' });
@@ -494,8 +486,11 @@ router.patch('/:silknotePatientUuid/documents/:documentId/patient-info', async (
     console.log(`[PATIENT ROUTES] Updating patient info for document ${documentId} in patient ${silknotePatientUuid}`)
     console.log(`[PATIENT ROUTES] New info: Name="${patientName}", DOB="${dateOfBirth}"`)
 
+    // Get user UUID from auth middleware (aligned with other endpoints)
+    const silknoteUserUuid = getUserUuid(req);
+    
     // Get the patient
-    const patient = await patientService.getPatientById(silknotePatientUuid)
+    const patient = await patientService.getPatientById(silknotePatientUuid, silknoteUserUuid)
     if (!patient) {
       return res.status(404).json({ error: 'Patient not found' })
     }
@@ -572,8 +567,8 @@ router.post('/documents/:documentId/reprocess', async (req, res) => {
       return res.status(400).json({ error: 'Document ID is required' })
     }
 
-    // Get user UUID from headers
-    const silknoteUserUuid = req.headers['x-silknote-user-uuid'] as string || req.headers['silknote-user-uuid'] as string;
+    // Get user UUID from auth middleware (aligned with other endpoints)
+    const silknoteUserUuid = getUserUuid(req);
     
     if (!silknoteUserUuid) {
       return res.status(400).json({ error: 'Missing required header: silknote-user-uuid' });
@@ -642,8 +637,8 @@ router.delete('/:patientId/case-summary', asyncHandler(async (req: Request, res:
     const { patientId } = req.params;
     logger.info(`Received request to clear case summary for patient ${patientId}`);
 
-    // Get user UUID from headers
-    const silknoteUserUuid = req.headers['x-silknote-user-uuid'] as string || req.headers['silknote-user-uuid'] as string;
+    // Get user UUID from auth middleware (aligned with other endpoints)
+    const silknoteUserUuid = getUserUuid(req);
     
     if (!silknoteUserUuid) {
         logger.warn('Missing silknoteUserUuid in request headers');
@@ -682,18 +677,8 @@ router.post('/:silknotePatientUuid/activate', async (req: Request, res: Response
     })
   }
   
-  // Get user UUID from either middleware (req.user) or headers
-  let silknoteUserUuid: string | undefined;
-  
-  if (req.user?.id) {
-    silknoteUserUuid = req.user.id;
-  } else {
-    silknoteUserUuid = req.headers['x-silknote-user-uuid'] as string || req.headers['silknote-user-uuid'] as string;
-  }
-  
-  if (!silknoteUserUuid) {
-    return res.status(401).json({ error: 'Missing authentication: x-silknote-user-uuid header or authenticated user required' });
-  }
+  // Get user UUID from auth middleware (aligned with other endpoints)
+  const silknoteUserUuid = getUserUuid(req);
   
   // Validate user-key
   // Expected format: sha256(`${silknoteUserUuid}{${silknoteUserUuid}}`)
