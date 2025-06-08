@@ -65,20 +65,38 @@ export async function getPatientsByUserId(silknoteUserUuid: string): Promise<Pat
 }
 
 export async function getPatientById(silknotePatientUuid: string, silknoteUserUuid?: string): Promise<PatientDetails | null> {
-  logger.info(`Getting patient by ID: ${silknotePatientUuid}`);
+  logger.info(`Getting patient by ID: ${silknotePatientUuid}, User UUID: ${silknoteUserUuid}`);
+  console.log(`[DEBUG] getPatientById called with:`, {
+    silknotePatientUuid,
+    silknoteUserUuid,
+    silknoteUserUuidType: typeof silknoteUserUuid,
+    silknoteUserUuidLength: silknoteUserUuid?.length
+  });
+  
   try {
     if (!storageService.isInitialized()) {
+      console.error('[DEBUG] Storage service not initialized');
       throw new Error('Storage service not initialized');
     }
     
     if (!silknoteUserUuid) {
+      console.error('[DEBUG] silknoteUserUuid is missing or falsy:', silknoteUserUuid);
       throw new Error('silknoteUserUuid is required');
     }
+    
+    console.log(`[DEBUG] Calling storageService.dbAdapter.getPatient with:`, {
+      silknoteUserUuid,
+      silknotePatientUuid
+    });
     
     const patient = await storageService.dbAdapter.getPatient(silknoteUserUuid, silknotePatientUuid);
 
     if (!patient) {
-      logger.warn(`Patient not found: ${silknotePatientUuid}`);
+      logger.warn(`Patient not found: ${silknotePatientUuid} for user: ${silknoteUserUuid}`);
+      console.log(`[DEBUG] Patient not found in database for:`, {
+        silknotePatientUuid,
+        silknoteUserUuid
+      });
       return null;
     }
 

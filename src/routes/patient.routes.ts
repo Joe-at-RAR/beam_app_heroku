@@ -125,12 +125,24 @@ router.get('/:silknotePatientUuid', async (req, res) => {
     silknoteUserUuid = req.headers['x-silknote-user-uuid'] as string || req.headers['silknote-user-uuid'] as string;
   }
   
+  console.log(`[DEBUG PATIENT ROUTE] GET /${silknotePatientUuid} - User UUID extraction:`, {
+    fromReqUser: req.user?.id,
+    fromHeaderXSilknote: req.headers['x-silknote-user-uuid'],
+    fromHeaderSilknote: req.headers['silknote-user-uuid'],
+    finalUserUuid: silknoteUserUuid,
+    finalUserUuidLength: silknoteUserUuid?.length
+  });
+  
   if (!silknoteUserUuid) {
     return res.status(401).json({ error: 'Missing authentication: x-silknote-user-uuid header or authenticated user required' });
   }
   
   try {
     // Get the complete patient data including fileSet
+    console.log(`[DEBUG PATIENT ROUTE] Calling getPatientById with:`, {
+      silknotePatientUuid,
+      silknoteUserUuid
+    });
     const patient = await patientService.getPatientById(silknotePatientUuid, silknoteUserUuid)
     if (!patient) return res.status(404).json({ error: 'Patient not found' })
     
@@ -183,9 +195,21 @@ router.get('/:silknotePatientUuid/files', async (req, res) => {
     // Get user UUID from headers
     const silknoteUserUuid = req.headers['x-silknote-user-uuid'] as string || req.headers['silknote-user-uuid'] as string;
     
+    console.log(`[DEBUG FILES ROUTE] GET /${silknotePatientUuid}/files - User UUID extraction:`, {
+      fromHeaderXSilknote: req.headers['x-silknote-user-uuid'],
+      fromHeaderSilknote: req.headers['silknote-user-uuid'],
+      finalUserUuid: silknoteUserUuid,
+      finalUserUuidLength: silknoteUserUuid?.length
+    });
+    
     if (!silknoteUserUuid) {
       return res.status(400).json({ error: 'Missing required header: silknote-user-uuid' });
     }
+    
+    console.log(`[DEBUG FILES ROUTE] Calling getPatientById with:`, {
+      silknotePatientUuid,
+      silknoteUserUuid
+    });
     
     const patient = await patientService.getPatientById(silknotePatientUuid, silknoteUserUuid)
     
