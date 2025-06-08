@@ -215,8 +215,11 @@ export function createPrismaAdapter(): DatabaseAdapter {
         async saveDocument(silknoteUserUuid: string, silknotePatientUuid: string, document: MedicalDocument): Promise<boolean> {
             logger.info(`[PRISMA] saveDocument for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}, clientFileId: ${document.clientFileId}`);
             try {
-                const patientFileSet = await prisma.silknotePatientFileset.findUnique({
-                    where: { silknotePatientUuid, silknoteUserUuid },
+                const patientFileSet = await prisma.silknotePatientFileset.findFirst({
+                    where: { 
+                        silknotePatientUuid: silknotePatientUuid,
+                        silknoteUserUuid: silknoteUserUuid 
+                    },
                 });
                 if (!patientFileSet) {
                     logger.warn(`[PRISMA] saveDocument: Patient ${silknotePatientUuid} not found for user ${silknoteUserUuid}.`);
@@ -388,8 +391,11 @@ export function createPrismaAdapter(): DatabaseAdapter {
         async getDocumentsForPatient(silknoteUserUuid: string, silknotePatientUuid: string): Promise<MedicalDocument[]> {
             logger.info(`[PRISMA] getDocumentsForPatient for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}`);
             try {
-                const patientFileset = await prisma.silknotePatientFileset.findUnique({
-                    where: { silknotePatientUuid, silknoteUserUuid },
+                const patientFileset = await prisma.silknotePatientFileset.findFirst({
+                    where: { 
+                        silknotePatientUuid: silknotePatientUuid,
+                        silknoteUserUuid: silknoteUserUuid 
+                    },
                     include: { documents: true } // Fetch full document objects
                 });
 
@@ -451,8 +457,11 @@ export function createPrismaAdapter(): DatabaseAdapter {
         async getPatient(silknoteUserUuid: string, silknotePatientUuid: string): Promise<PatientDetails | null> {
             logger.info(`[PRISMA] getPatient for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}`);
             try {
-                const patientFileset = await prisma.silknotePatientFileset.findUnique({
-                    where: { silknotePatientUuid, silknoteUserUuid },
+                const patientFileset = await prisma.silknotePatientFileset.findFirst({
+                    where: { 
+                        silknotePatientUuid: silknotePatientUuid,
+                        silknoteUserUuid: silknoteUserUuid 
+                    },
                     ...patientWithFullDocumentsArgs // Use predefined args for include
                 });
                 return mapPrismaPatientToPatientDetails(patientFileset);
@@ -640,8 +649,11 @@ export function createPrismaAdapter(): DatabaseAdapter {
         async getPatientVectorStore(silknoteUserUuid: string, silknotePatientUuid: string): Promise<any | null> {
             logger.info(`[PRISMA] getPatientVectorStore for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}`);
             try {
-                const patientFileset = await prisma.silknotePatientFileset.findUnique({
-                    where: { silknotePatientUuid, silknoteUserUuid },
+                const patientFileset = await prisma.silknotePatientFileset.findFirst({
+                    where: { 
+                        silknotePatientUuid: silknotePatientUuid,
+                        silknoteUserUuid: silknoteUserUuid 
+                    },
                     select: { vectorStoreJson: true }
                 });
                 
@@ -659,8 +671,11 @@ export function createPrismaAdapter(): DatabaseAdapter {
         async updatePatientVectorStoreErrors(silknoteUserUuid: string, silknotePatientUuid: string, errors: VectorStoreError[]): Promise<boolean> {
             logger.info(`[PRISMA] updatePatientVectorStoreErrors for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}`);
             try {
-                await prisma.silknotePatientFileset.update({
-                    where: { silknotePatientUuid, silknoteUserUuid },
+                await prisma.silknotePatientFileset.updateMany({
+                    where: { 
+                        silknotePatientUuid: silknotePatientUuid,
+                        silknoteUserUuid: silknoteUserUuid 
+                    },
                     data: { errors: errors as any } // Prisma will handle JSON serialization
                 });
                 return true;
@@ -674,8 +689,11 @@ export function createPrismaAdapter(): DatabaseAdapter {
             logger.info(`[PRISMA] validateVectorStoreSync for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}`);
             try {
                 // Get patient with documents and vector store info
-                const patientFileset = await prisma.silknotePatientFileset.findUnique({
-                    where: { silknotePatientUuid, silknoteUserUuid },
+                const patientFileset = await prisma.silknotePatientFileset.findFirst({
+                    where: { 
+                        silknotePatientUuid: silknotePatientUuid,
+                        silknoteUserUuid: silknoteUserUuid 
+                    },
                     include: { documents: true }
                 });
 
