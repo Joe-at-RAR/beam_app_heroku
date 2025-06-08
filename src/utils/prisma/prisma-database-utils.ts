@@ -455,8 +455,28 @@ export function createPrismaAdapter(): DatabaseAdapter {
         },
 
         async getPatient(silknoteUserUuid: string, silknotePatientUuid: string): Promise<PatientDetails | null> {
+            console.log(`[PRISMA-DEBUG] ========== getPatient START ==========`);
+            console.log(`[PRISMA-DEBUG] Input parameters:`, {
+                silknoteUserUuid,
+                silknotePatientUuid,
+                silknoteUserUuidType: typeof silknoteUserUuid,
+                silknotePatientUuidType: typeof silknotePatientUuid,
+                silknoteUserUuidLength: silknoteUserUuid?.length,
+                silknotePatientUuidLength: silknotePatientUuid?.length
+            });
+            
             logger.info(`[PRISMA] getPatient for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}`);
             try {
+                console.log(`[PRISMA-DEBUG] About to execute Prisma findFirst query...`);
+                console.log(`[PRISMA-DEBUG] Query parameters:`, {
+                    where: {
+                        silknotePatientUuid: silknotePatientUuid,
+                        silknoteUserUuid: silknoteUserUuid
+                    }
+                });
+                console.log(`[PRISMA-DEBUG] Include args:`, JSON.stringify(patientWithFullDocumentsArgs, null, 2));
+                
+                const queryStartTime = Date.now();
                 const patientFileset = await prisma.silknotePatientFileset.findFirst({
                     where: { 
                         silknotePatientUuid: silknotePatientUuid,
@@ -464,9 +484,48 @@ export function createPrismaAdapter(): DatabaseAdapter {
                     },
                     ...patientWithFullDocumentsArgs // Use predefined args for include
                 });
-                return mapPrismaPatientToPatientDetails(patientFileset);
+                const queryDuration = Date.now() - queryStartTime;
+                
+                console.log(`[PRISMA-DEBUG] Query completed in ${queryDuration}ms`);
+                console.log(`[PRISMA-DEBUG] Raw query result:`, {
+                    found: !!patientFileset,
+                    resultType: typeof patientFileset,
+                    resultKeys: patientFileset ? Object.keys(patientFileset) : 'null',
+                    silknotePatientUuid: patientFileset?.silknotePatientUuid,
+                    silknoteUserUuid: patientFileset?.silknoteUserUuid,
+                    patientName: patientFileset?.patientName,
+                    documentsCount: patientFileset?.documents?.length || 0
+                });
+                
+                if (!patientFileset) {
+                    console.log(`[PRISMA-DEBUG] ❌ NO PATIENT FOUND - Query returned null`);
+                    console.log(`[PRISMA-DEBUG] This means either:`);
+                    console.log(`[PRISMA-DEBUG] 1. No record exists with silknotePatientUuid = '${silknotePatientUuid}'`);
+                    console.log(`[PRISMA-DEBUG] 2. No record exists with silknoteUserUuid = '${silknoteUserUuid}'`);
+                    console.log(`[PRISMA-DEBUG] 3. No record exists with BOTH conditions`);
+                    console.log(`[PRISMA-DEBUG] ========== getPatient END (NOT FOUND) ==========`);
+                    return null;
+                }
+                
+                console.log(`[PRISMA-DEBUG] ✅ PATIENT FOUND - Converting to PatientDetails...`);
+                const result = mapPrismaPatientToPatientDetails(patientFileset);
+                console.log(`[PRISMA-DEBUG] Mapped result:`, {
+                    silknotePatientUuid: result?.silknotePatientUuid,
+                    silknoteUserUuid: result?.silknoteUserUuid,
+                    name: result?.name,
+                    fileSetCount: result?.fileSet?.length || 0
+                });
+                console.log(`[PRISMA-DEBUG] ========== getPatient END (SUCCESS) ==========`);
+                return result;
             } catch (error: any) {
-                logger.error(`[PRISMA] Error in getPatient for patient '${silknotePatientUuid}':`, error);
+                console.error(`[PRISMA-DEBUG] ❌ QUERY ERROR:`, {
+                    errorMessage: error.message,
+                    errorName: error.name,
+                    errorCode: error.code,
+                    errorStack: error.stack
+                });
+                logger.error(`[PRISMA] getPatient error for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}`, error);
+                console.log(`[PRISMA-DEBUG] ========== getPatient END (ERROR) ==========`);
                 return null;
             }
         },
@@ -672,7 +731,7 @@ export function createPrismaAdapter(): DatabaseAdapter {
             logger.info(`[PRISMA] updatePatientVectorStoreErrors for user: ${silknoteUserUuid}, patient: ${silknotePatientUuid}`);
             try {
                 await prisma.silknotePatientFileset.updateMany({
-                    where: { 
+                    where: {
                         silknotePatientUuid: silknotePatientUuid,
                         silknoteUserUuid: silknoteUserUuid 
                     },
@@ -690,11 +749,11 @@ export function createPrismaAdapter(): DatabaseAdapter {
             try {
                 // Get patient with documents and vector store info
                 const patientFileset = await prisma.silknotePatientFileset.findFirst({
-                    where: { 
+                    where: {
                         silknotePatientUuid: silknotePatientUuid,
                         silknoteUserUuid: silknoteUserUuid 
                     },
-                    include: { documents: true }
+                    include: { documents: true } 
                 });
 
                 if (!patientFileset) {

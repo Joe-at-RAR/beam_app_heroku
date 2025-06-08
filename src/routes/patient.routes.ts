@@ -14,7 +14,7 @@ import { io } from '../socket'
 import { storageService } from '../utils/storage'
 import { asyncHandler } from "../utils/errorHandlers";
 import { createLogger } from '../utils/logger';
-import { getUserUuid } from '../middleware/auth';
+import { getSilknoteUserUuid } from '../middleware/auth';
 
 // Extend Express Request type to include user information
 declare global {
@@ -114,12 +114,11 @@ router.get('/', async (req, res) => {
 router.get('/:silknotePatientUuid', async (req, res) => {
   const silknotePatientUuid = req.params.silknotePatientUuid
   
-  // Get user UUID from auth middleware (aligned with other endpoints)
-  const silknoteUserUuid = getUserUuid(req);
+  // Get user UUID from headers
+  const silknoteUserUuid = getSilknoteUserUuid(req);
   
   console.log(`[DEBUG PATIENT ROUTE] GET /${silknotePatientUuid} - User UUID extraction:`, {
-    fromGetUserUuid: silknoteUserUuid,
-    fromReqUser: req.user?.id,
+    fromGetSilknoteUserUuid: silknoteUserUuid,
     fromHeaderXSilknote: req.headers['x-silknote-user-uuid'],
     finalUserUuid: silknoteUserUuid,
     finalUserUuidLength: silknoteUserUuid?.length
@@ -185,10 +184,10 @@ router.get('/:silknotePatientUuid/files', async (req, res) => {
     }
     
     // Get user UUID from auth middleware (aligned with other endpoints)
-    const silknoteUserUuid = getUserUuid(req);
+    const silknoteUserUuid = getSilknoteUserUuid(req);
     
     console.log(`[DEBUG FILES ROUTE] GET /${silknotePatientUuid}/files - User UUID extraction:`, {
-      fromGetUserUuid: silknoteUserUuid,
+      fromGetSilknoteUserUuid: silknoteUserUuid,
       fromHeaderXSilknote: req.headers['x-silknote-user-uuid'],
       finalUserUuid: silknoteUserUuid,
       finalUserUuidLength: silknoteUserUuid?.length
@@ -285,7 +284,7 @@ router.post(
     }
 
     // Get user UUID from auth middleware (aligned with other endpoints)
-    const silknoteUserUuid = getUserUuid(req);
+    const silknoteUserUuid = getSilknoteUserUuid(req);
     
     if (!silknoteUserUuid) {
       return res.status(400).json({ success: false, error: 'Missing required header: silknote-user-uuid' });
@@ -435,7 +434,7 @@ router.delete('/:silknotePatientUuid', async (req, res) => {
   const { silknotePatientUuid } = req.params
   
   // Get user UUID from auth middleware (aligned with other endpoints)
-  const silknoteUserUuid = getUserUuid(req);
+  const silknoteUserUuid = getSilknoteUserUuid(req);
   
   if (!silknoteUserUuid) {
     return res.status(400).json({ error: 'Missing required header: silknote-user-uuid' });
@@ -487,7 +486,7 @@ router.patch('/:silknotePatientUuid/documents/:documentId/patient-info', async (
     console.log(`[PATIENT ROUTES] New info: Name="${patientName}", DOB="${dateOfBirth}"`)
 
     // Get user UUID from auth middleware (aligned with other endpoints)
-    const silknoteUserUuid = getUserUuid(req);
+    const silknoteUserUuid = getSilknoteUserUuid(req);
     
     // Get the patient
     const patient = await patientService.getPatientById(silknotePatientUuid, silknoteUserUuid)
@@ -568,7 +567,7 @@ router.post('/documents/:documentId/reprocess', async (req, res) => {
     }
 
     // Get user UUID from auth middleware (aligned with other endpoints)
-    const silknoteUserUuid = getUserUuid(req);
+    const silknoteUserUuid = getSilknoteUserUuid(req);
     
     if (!silknoteUserUuid) {
       return res.status(400).json({ error: 'Missing required header: silknote-user-uuid' });
@@ -638,7 +637,7 @@ router.delete('/:patientId/case-summary', asyncHandler(async (req: Request, res:
     logger.info(`Received request to clear case summary for patient ${patientId}`);
 
     // Get user UUID from auth middleware (aligned with other endpoints)
-    const silknoteUserUuid = getUserUuid(req);
+    const silknoteUserUuid = getSilknoteUserUuid(req);
     
     if (!silknoteUserUuid) {
         logger.warn('Missing silknoteUserUuid in request headers');
@@ -678,7 +677,7 @@ router.post('/:silknotePatientUuid/activate', async (req: Request, res: Response
   }
   
   // Get user UUID from auth middleware (aligned with other endpoints)
-  const silknoteUserUuid = getUserUuid(req);
+  const silknoteUserUuid = getSilknoteUserUuid(req);
   
   // Validate user-key
   // Expected format: sha256(`${silknoteUserUuid}{${silknoteUserUuid}}`)

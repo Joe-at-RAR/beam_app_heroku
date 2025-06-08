@@ -1,62 +1,57 @@
 import { Request, Response, NextFunction } from 'express';
-import { createLogger } from '../utils/logger';
 
-const logger = createLogger('AUTH_MIDDLEWARE');
-
-// Extend Express Request type to include user information
+// Extend Express Request type to include silknoteUserUuid
 declare global {
   namespace Express {
     interface Request {
-      user?: {
-        id: string;
-      };
+      silknoteUserUuid?: string;
     }
   }
 }
 
 /**
- * Middleware to enforce authentication via x-silknote-user-uuid header
- * This should be replaced with proper JWT/OAuth authentication in production
+ * Simple middleware to extract silknoteUserUuid from headers
+ * Auth is handled at a higher level before reaching the server
  */
-export function requireAuth(req: Request, res: Response, next: NextFunction): void {
-  const userUuid = req.headers['x-silknote-user-uuid'] as string;
+export function extractHeaders(req: Request, res: Response, next: NextFunction) {
+  // Extract silknoteUserUuid from headers
+  const silknoteUserUuid = req.headers['x-silknote-user-uuid'] as string;
   
-  if (!userUuid) {
-    logger.warn(`Unauthorized request to ${req.method} ${req.path} - missing x-silknote-user-uuid header`);
-    res.status(401).json({ 
-      error: 'Authentication required',
-      message: 'Missing x-silknote-user-uuid header'
-    });
-    return;
+  if (silknoteUserUuid) {
+    req.silknoteUserUuid = silknoteUserUuid;
   }
   
-  // Validate UUID format (basic check)
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  if (!uuidRegex.test(userUuid)) {
-    logger.warn(`Invalid user UUID format: ${userUuid}`);
-    res.status(401).json({ 
-      error: 'Invalid authentication',
-      message: 'Invalid x-silknote-user-uuid format'
-    });
-    return;
-  }
+  console.log(`[MIDDLEWARE] Extracted silknoteUserUuid: ${silknoteUserUuid}`);
   
-  // Attach user to request
-  req.user = { id: userUuid };
-  
-  logger.debug(`Authenticated request from user ${userUuid} to ${req.method} ${req.path}`);
   next();
 }
 
 /**
- * Helper function to extract user UUID from request
- * Throws error if not authenticated
+ * Get silknoteUserUuid from request (either from middleware or headers)
  */
-export function getUserUuid(req: Request): string {
-  if (!req.user?.id) {
-    throw new Error('User not authenticated');
+export function getSilknoteUserUuid(req: Request): string {
+  // First try from middleware
+  if (req.silknoteUserUuid) {
+    return req.silknoteUserUuid;
   }
-  return req.user.id;
+  
+  // Fallback to direct header extraction
+  const silknoteUserUuid = req.headers['x-silknote-user-uuid'] as string;
+  if (!silknoteUserUuid) {
+    throw new Error('Missing required header: x-silknote-user-uuid');
+  }
+  
+  return silknoteUserUuid;
+}
+
+// Legacy compatibility - this should be replaced everywhere
+export function getUserUuid(req: Request): string {
+  return getSilknoteUserUuid(req);
+}
+
+// Legacy compatibility
+export function requireAuth(req: Request, res: Response, next: NextFunction) {
+  extractHeaders(req, res, next);
 }
 
 /**

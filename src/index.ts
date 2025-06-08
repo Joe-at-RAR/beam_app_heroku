@@ -28,7 +28,7 @@ import documentReprocessRouter from './routes/document-reprocess';
 import vectorSearchRouter from './routes/vectorSearch';
 import documentAlertsRouter from './routes/documentAlerts';
 import { getPatientById } from './services/patientService';
-import { requireAuth } from './middleware/auth';
+import { extractHeaders } from './middleware/auth';
 
 ////////////////////////////////////////////////////////////////
 // Express App Configuration
@@ -239,9 +239,9 @@ app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok' });
 });
 
-// Apply authentication middleware to all /api routes EXCEPT administrative endpoints
+// Apply header extraction middleware to all /api routes
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
-  // List of endpoints that don't require authentication
+  // List of endpoints that don't require headers (if any)
   const publicEndpoints = [
     '/api/documents/reprocess', // Administrative endpoint
     '/api/users' // User registration
@@ -253,12 +253,12 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   );
   
   if (isPublicEndpoint) {
-    // Skip authentication for public endpoints
+    // Skip header extraction for public endpoints
     return next();
   }
   
-  // Apply authentication for all other endpoints
-  return requireAuth(req, res, next);
+  // Extract headers for all other endpoints
+  return extractHeaders(req, res, next);
 });
 
 // API endpoints (authentication applied selectively above)
