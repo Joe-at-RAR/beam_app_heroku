@@ -936,6 +936,7 @@ model File {
   fileType  String
   blobUrl   String
   uploadedAt DateTime @default(now())
+
   jobId     String?
   job       Job?     @relation(fields: [jobId], references: [id])
   userId    String
@@ -954,7 +955,7 @@ model SilknotePatientFileset {
   silknoteUserUuid              String 
   user                User      @relation(fields: [silknoteUserUuid], references: [silknoteUserUuid])
   activatedUse Boolean @default(false)
-  activatedUseTime DateTime?
+    activatedUseTime DateTime?
 
   // Store patient context directly here, mirroring PatientDetails
   patientName         String? 
@@ -970,7 +971,7 @@ model SilknotePatientFileset {
 
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
-
+  
   errors Json? 
 
   // Relation to documents associated with this patient UUID
@@ -1011,6 +1012,8 @@ model SilknoteDocument {
 
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
+
+    VSRXReference String? 
 
   @@map("silknote_documents")
   @@index([patientUuid])

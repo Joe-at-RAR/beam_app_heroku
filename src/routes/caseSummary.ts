@@ -752,7 +752,7 @@ export async function generateComprehensiveCaseSummary(
         extractPatientInfo(silknotePatientUuid, true, silknoteUserUuid),
         extractDiagnosesAndTreatments(silknotePatientUuid, true, silknoteUserUuid),
         extractComprehensiveTimeline(silknotePatientUuid, true, silknoteUserUuid),
-        generateInconsistenciesWithObject(silknotePatientUuid, silknoteUserUuid)
+        generateInconsistenciesWithObject(silknotePatientUuid, silknoteUserUuid, true) // Pass true for embedMarkers
       ]);
 
       console.log(`[!!!!!!!!!!!!!!!VECTOR STORE - GEN_COMP_SUMMARY] Inconsistencies Result:`);
@@ -1629,7 +1629,8 @@ async function extractDiagnosesAndTreatments(
  */
 export async function generateInconsistenciesWithObject(
   silknotePatientUuid: string,
-  silknoteUserUuid: string // Now required parameter
+  silknoteUserUuid: string, // Now required parameter
+  embedMarkers: boolean = true // Add parameter to control citation marker embedding
 ): Promise<{
   content: {
     hasInconsistencies: boolean;
@@ -1763,7 +1764,7 @@ Return ONLY the JSON object with your findings. Do not include any other text or
       silknotePatientUuid,
       inconsistencyPrompt,
       inconsistencySchema,
-      false, // Don't embed markers for inconsistencies
+      embedMarkers, // Pass the embedMarkers parameter instead of hardcoding false
       silknoteUserUuid // Pass userUuid
     );
     

@@ -1,0 +1,38 @@
+{
+  "name": "vsrx-sync-integration",
+  "version": "1.0.0",
+  "description": "VSRX to VitalSign/Silknote file synchronization",
+  "main": "vsrx-sync.js",
+  "scripts": {
+    "build": "tsc vsrx-sync.ts --target es2020 --module commonjs",
+    "sync": "node vsrx-sync.js",
+    "sync:dry": "SYNC_DRY_RUN=true node vsrx-sync.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "vsrx",
+    "sync",
+    "mysql",
+    "file-sync"
+  ],
+  "author": "VSRX Integration Team",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "mysql2": "^3.6.5",
+    "node-fetch": "^2.7.0",
+    "form-data": "^4.0.0",
+    "dotenv": "^16.3.1",
+    "libreoffice-convert": "^1.4.1",
+    "mammoth": "^1.6.0",
+    "html-pdf": "^3.0.1",
+    "@kenjiuno/msgreader": "^1.19.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "@types/node-fetch": "^2.6.9",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+} 

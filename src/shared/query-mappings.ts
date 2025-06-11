@@ -28,7 +28,7 @@ export interface PredefinedQuery {
   1. Begin with a brief overview stating the total number of providers who offered opinions and whether there is general consensus or significant disagreement.
   2. Create distinct sections for each major diagnostic conclusion.
   3. For each diagnostic grouping, create a table with these exact columns:
-     | Provider | Specialty | Date | Diagnosis | Key Quote | Citation |
+     | Provider | Specialty | Date | Diagnosis | Key Quote | 
   
   SPECIFIC REQUIREMENTS:
   - Include ONLY the most recent opinion from each provider if their assessment evolved over time
@@ -58,7 +58,7 @@ YOUR MOST CRITICAL INSTRUCTION - EVERYTHING MUST HAVE CITATIONS TO THE DOCUMENTS
 FORMAT YOUR RESPONSE AS FOLLOWS:
 1. Begin with a brief summary stating how many providers had notable changes in their opinions.
 2. For each provider who modified their assessment, create a table with these exact columns:
-   | Provider | Specialty | Date | Original Opinion | Date | Revised Opinion | Citation |
+   | Provider | Specialty | Date | Original Opinion | Date | Revised Opinion | 
 
 SPECIFIC REQUIREMENTS:
 - Never make generic statements, only ones specific to this patients case. For instance the doctor reading this has substantial clinical knowledge to support their understanding and it is unhelpful to make basic statements about meaning which they easily know in their context..
@@ -95,7 +95,7 @@ FORMAT YOUR RESPONSE AS FOLLOWS:
 2. For each disputed issue, create a section with:
    A. A precise statement of the disputed issue (e.g., "Nature of Spinal Pathology" or "Causative Relationship to Workplace Incident")
    B. A table with these exact columns:
-      | Position A | Advocates (Provider) | Specialty | Date | Key Support For Position A | Position B | Advocates (Provider) | Specialty | Date | Key Support For Position B | Citation |
+      | Position A | Advocates (Provider) | Specialty | Date | Key Support For Position A | Position B | Advocates (Provider) | Specialty | Date | Key Support For Position B | 
 
 SPECIFIC REQUIREMENTS:
 - Never make generic statements, only ones specific to this patients case. For instance the doctor reading this has substantial clinical knowledge to support their understanding and it is unhelpful to make basic statements about meaning which they easily know in their context..
@@ -126,7 +126,7 @@ YOUR MOST CRITICAL INSTRUCTION - EVERYTHING MUST HAVE CITATIONS TO THE DOCUMENTS
 FORMAT YOUR RESPONSE AS FOLLOWS:
 1. Begin with a brief overview of the initial presentation and most recent diagnostic conclusion.
 2. Create a chronological timeline table with these exact columns:
-   | Date | Provider | Specialty | Diagnosis/Clinical Impression | Key Diagnostic Evidence | Change from Previous | Citation |
+   | Date | Provider | Specialty | Diagnosis/Clinical Impression | Key Diagnostic Evidence | Change from Previous | 
 
 SPECIFIC REQUIREMENTS:
 - Never make generic statements, only ones specific to this patients case. For instance the doctor reading this has substantial clinical knowledge to support their understanding and it is unhelpful to make basic statements about meaning which they easily know in their context..
@@ -158,7 +158,7 @@ YOUR MOST CRITICAL INSTRUCTION - EVERYTHING MUST HAVE CITATIONS TO THE DOCUMENTS
 FORMAT YOUR RESPONSE AS FOLLOWS:
 1. Begin with an executive summary (Do not write the title 'Executive summary', just do dot points) of the main causation theories present in the file.
 2. Create a table with these exact columns:
-   | Provider | Specialty | Date | Causation Determination | Certainty Language | Key Reasoning | Alternative Factors Noted | Citation |
+   | Provider | Specialty | Date | Causation Determination | Certainty Language | Key Reasoning | Alternative Factors Noted | 
 
 3. After the table, organize providers into clearly labeled groups:
    A. Those attributing the condition PRIMARILY to the claimed incident
@@ -197,7 +197,7 @@ FORMAT YOUR RESPONSE AS FOLLOWS:
 2. For each pre-existing condition, create a section with:
    A. Brief description of the condition and when it was first documented
    B. A table with these exact columns:
-      | Date | Provider | Specialty | Assessment of Relevance | Impact on Current Condition | Supporting Evidence | Citation |
+      | Date | Provider | Specialty | Assessment of Relevance | Impact on Current Condition | Supporting Evidence | 
 
 SPECIFIC REQUIREMENTS:
 - Never make generic statements, only ones specific to this patients case. For instance the doctor reading this has substantial clinical knowledge to support their understanding and it is unhelpful to make basic statements about meaning which they easily know in their context..
@@ -230,7 +230,7 @@ YOUR MOST CRITICAL INSTRUCTION - EVERYTHING MUST HAVE CITATIONS TO THE DOCUMENTS
 FORMAT YOUR RESPONSE AS FOLLOWS:
 1. 1. Begin with an executive summary (Do not write the title 'Executive summary', just do dot points) of the claimed injury mechanism as most consistently reported.
 2. Create a table with these exact columns:
-   | Provider | Specialty | Date | Assessment of Mechanism | Key Quote | Biomechanical Reasoning | Citation |
+   | Provider | Specialty | Date | Assessment of Mechanism | Key Quote | Biomechanical Reasoning | 
 
 3. After the table, organize providers into clearly labeled categories:
    A. Those who EXPLICITLY VALIDATED the injury mechanism as consistent with the diagnosis
@@ -268,7 +268,7 @@ This mechanism analysis is particularly relevant to causation determination unde
 FORMAT YOUR RESPONSE AS FOLLOWS:
 1. Begin with an executive summary (Do not write the title 'Executive summary', just do dot points) of the initial presentation and the most recent status.
 2. Create a chronological table with these exact columns:
-   | Date | Provider | Specialty | Symptoms Reported | Objective Findings | Change from Previous Visit | Treatment at Time | Citation |
+   | Date | Provider | Specialty | Symptoms Reported | Objective Findings | Change from Previous Visit | Treatment at Time | 
 
 3. After the comprehensive table, create a condensed symptom trajectory section that groups similar periods:
    A. Initial presentation period (first 2-4 weeks): Brief summary
@@ -312,7 +312,7 @@ FORMAT YOUR RESPONSE AS FOLLOWS:
    C. Physical Examination Findings (ROM, strength, special tests, etc.)
 
 3. For each section, create a table with these exact columns:
-   | Date | Provider | Specialty | Test/Examination | Finding | Supports/Contradicts | Citation |
+   | Date | Provider | Specialty | Test/Examination | Finding | Supports/Contradicts | 
 
 SPECIFIC REQUIREMENTS:
 - Never make generic statements, only ones specific to this patients case. For instance the doctor reading this has substantial clinical knowledge to support their understanding and it is unhelpful to make basic statements about meaning which they easily know in their context..
@@ -349,7 +349,7 @@ FORMAT YOUR RESPONSE AS FOLLOWS:
 3. For each diagnostic study, create a detailed entry with:
    A. Test Details: [Test Type] - [Date] - [Facility] - [Ordering Provider] - [Citation]
    B. A table with these exact columns:
-      | Interpreter | Specialty | Date | Role | Key Findings | Clinical Correlation | Significance to Claim | Citation |
+      | Interpreter | Specialty | Date | Role | Key Findings | Clinical Correlation | Significance to Claim | 
 
 SPECIFIC REQUIREMENTS:
 - Never make generic statements, only ones specific to this patients case. For instance the doctor reading this has substantial clinical knowledge to support their understanding and it is unhelpful to make basic statements about meaning which they easily know in their context..
@@ -382,7 +382,7 @@ YOUR MOST CRITICAL INSTRUCTION - EVERYTHING MUST HAVE CITATIONS TO THE DOCUMENTS
 FORMAT YOUR RESPONSE AS FOLLOWS:
 1. Begin with a concise statement about whether such findings were documented and their general pattern.
 2. Create a chronological table with these exact columns:
-   | Date | Provider | Specialty | Non-organic Finding | Assessment Method | Provider's Interpretation | Citation |
+   | Date | Provider | Specialty | Non-organic Finding | Assessment Method | Provider's Interpretation | 
 
 3. After the table, organize the findings into these categories (if present):
    A. Waddell's signs or similar validated non-organic tests
@@ -428,7 +428,7 @@ FORMAT YOUR RESPONSE AS FOLLOWS:
    D. Treatment Response Consistency
 
 3. For each section, create a table with these exact columns:
-   | Date | Provider | Specialty | Patient's Report | Consistency Assessment | Notable Variations | Citation |
+   | Date | Provider | Specialty | Patient's Report | Consistency Assessment | Notable Variations | 
 
 SPECIFIC REQUIREMENTS:
 - Never make generic statements, only ones specific to this patients case. For instance the doctor reading this has substantial clinical knowledge to support their understanding and it is unhelpful to make basic statements about meaning which they easily know in their context..
@@ -469,7 +469,7 @@ FORMAT YOUR RESPONSE AS FOLLOWS:
    E. Other Interventions (e.g., psychological, alternative medicine)
 
 3. For each section, create a detailed chronological table with these exact columns:
-   | Date Range | Treatment Details | Provider | Specialty | Reported Outcome | Objective Change | Citation |
+   | Date Range | Treatment Details | Provider | Specialty | Reported Outcome | Objective Change | 
 
 SPECIFIC REQUIREMENTS:
 - Never make generic statements, only ones specific to this patients case. For instance the doctor reading this has substantial clinical knowledge to support their understanding and it is unhelpful to make basic statements about meaning which they easily know in their context..
@@ -504,7 +504,7 @@ YOUR MOST CRITICAL INSTRUCTION - EVERYTHING MUST HAVE CITATIONS TO THE DOCUMENTS
 FORMAT YOUR RESPONSE AS FOLLOWS:
 1. 1. Begin with an executive summary (Do not write the title 'Executive summary', just do dot points)  of the main treatment recommendations and their collective purpose.
 2. Create a table with these exact columns:
-   | Recommended Treatment | Date | Recommending Provider | Specialty | Purpose | Timeframe | Approval Status | Citation |
+   | Recommended Treatment | Date | Recommending Provider | Specialty | Purpose | Timeframe | Approval Status | 
 
 3. After the comprehensive table, organize recommendations into these categories:
    A. Curative Treatments (intended to resolve the condition)
@@ -582,7 +582,7 @@ YOUR MOST CRITICAL INSTRUCTION - EVERYTHING MUST HAVE CITATIONS TO THE DOCUMENTS
 FORMAT YOUR RESPONSE AS FOLLOWS:
 1. 1. Begin with an executive summary (Do not write the title 'Executive summary', just do dot points)  of the overall compliance pattern.
 2. Create a chronological table with these exact columns:
-   | Date | Provider | Specialty | Treatment | Compliance | Provider's Notation | Citation |
+   | Date | Provider | Specialty | Treatment | Compliance | Provider's Notation | 
 
 3. After the comprehensive table, organize by treatment type with sections for:
    A. Medication Compliance
@@ -668,7 +668,7 @@ YOUR MOST CRITICAL INSTRUCTION - EVERYTHING MUST HAVE CITATIONS TO THE DOCUMENTS
 FORMAT YOUR RESPONSE AS FOLLOWS:
 1. 1. Begin with an executive summary (Do not write the title 'Executive summary', just do dot points)  of the current work status and capacity trajectory.
 2. Create a chronological table with these exact columns:
-   | Date | Provider | Specialty | Work Capacity | Restrictions | Duration | Medical Basis | Citation |
+   | Date | Provider | Specialty | Work Capacity | Restrictions | Duration | Medical Basis | 
 
 3. After the comprehensive table, create these specific sections:
    A. Current Work Status: Detail the most recent formal work capacity assessment
@@ -711,7 +711,7 @@ FORMAT YOUR RESPONSE AS FOLLOWS:
 2. For each assessment, create a detailed entry with:
    A. Assessment Details: [Assessment Type] - [Date] - [Examiner & Qualification] - [Citation]
    B. A table with these exact columns:
-      | Functional Domain | Measured Capacity | Normal/Expected | % of Normal | Validity Indicators | Examiner's Interpretation | Citation |
+      | Functional Domain | Measured Capacity | Normal/Expected | % of Normal | Validity Indicators | Examiner's Interpretation | 
 
 3. After detailing each assessment, provide:
    A. A comparison of results across multiple assessments if available
@@ -750,7 +750,7 @@ YOUR MOST CRITICAL INSTRUCTION - EVERYTHING MUST HAVE CITATIONS TO THE DOCUMENTS
 FORMAT YOUR RESPONSE AS FOLLOWS:
 1. 1. Begin with an executive summary (Do not write the title 'Executive summary', just do dot points)  of the overall functional impact on daily life.
 2. Create a table with these exact columns:
-   | Date | Provider | Specialty | Activity Category | Reported Limitations | Provider Assessment | Citation |
+   | Date | Provider | Specialty | Activity Category | Reported Limitations | Provider Assessment | 
 
 3. After the comprehensive table, organize information into these functional domains:
    A. Self-Care Activities (dressing, bathing, grooming, etc.)
@@ -792,7 +792,7 @@ YOUR MOST CRITICAL INSTRUCTION - EVERYTHING MUST HAVE CITATIONS TO THE DOCUMENTS
 FORMAT YOUR RESPONSE AS FOLLOWS:
 1. Begin with an executive summary (no header , just dot points) of all return-to-work (RTW) attempts and overall pattern.
 2. Create a chronological table with these exact columns:
-   | Date Range | RTW Type | Hours/Duties | Outcome | Contributing Factors | Provider | Specialty | Citation |
+   | Date Range | RTW Type | Hours/Duties | Outcome | Contributing Factors | Provider | Specialty | 
 
 3. After the comprehensive table, provide:
    A. Analysis of patterns in successful versus unsuccessful RTW attempts
@@ -833,7 +833,7 @@ This return-to-work analysis is critical to the injury management requirements u
 FORMAT YOUR RESPONSE AS FOLLOWS:
 1. Begin with an executive summary (no header , just dot points) of all impairment assessments performed.
 2. Create a detailed table with these exact columns:
-   | Date | Assessor | Specialty | Assessment Purpose | Methodology/Guide | Body Region | Impairment Rating | Rationale | Citation |
+   | Date | Assessor | Specialty | Assessment Purpose | Methodology/Guide | Body Region | Impairment Rating | Rationale | 
 
 3. If multiple ratings exist, provide:
    A. A comparison table highlighting the differences in methodology and conclusions
@@ -874,7 +874,7 @@ YOUR MOST CRITICAL INSTRUCTION - EVERYTHING MUST HAVE CITATIONS TO THE DOCUMENTS
 FORMAT YOUR RESPONSE AS FOLLOWS:
 1. 1. Begin with an executive summary (Do not write the title 'Executive summary', just do dot points)  of the legal terminology patterns in the medical documentation.
 2. Create a table with these exact columns:
-   | Date | Provider | Specialty | Legal Term/Test Used | Context | Direct Quote | Citation |
+   | Date | Provider | Specialty | Legal Term/Test Used | Context | Direct Quote | 
 
 3. After the comprehensive table, organize findings into these categories:
    A. Material Contribution Language
@@ -916,7 +916,7 @@ YOUR MOST CRITICAL INSTRUCTION - EVERYTHING MUST HAVE CITATIONS TO THE DOCUMENTS
 FORMAT YOUR RESPONSE AS FOLLOWS:
 1. 1. Begin with an executive summary (Do not write the title 'Executive summary', just do dot points)  of the certification pattern and current status.
 2. Create a detailed chronological table with these exact columns:
-   | Date | Provider | Specialty | Time Period | Diagnosis | Work Capacity | Specific Restrictions | Next Review | Citation |
+   | Date | Provider | Specialty | Time Period | Diagnosis | Work Capacity | Specific Restrictions | Next Review | 
 
 3. After the comprehensive table, provide:
    A. A calculation of total time certified in each capacity category (no capacity, alternative duties, etc.)
@@ -960,7 +960,7 @@ YOUR MOST CRITICAL INSTRUCTION - EVERYTHING MUST HAVE CITATIONS TO THE DOCUMENTS
 FORMAT YOUR RESPONSE AS FOLLOWS:
 1. Begin with an executive summary (no header , just dot points) of all IMEs performed and their general alignment or divergence.
 2. Create a chronological table with these exact columns:
-   | Date | Examiner | Specialty | Requesting Party | Diagnosis | Causation Opinion | Work Capacity | Prognosis | Key Differences from Treating View | Citation |
+   | Date | Examiner | Specialty | Requesting Party | Diagnosis | Causation Opinion | Work Capacity | Prognosis | Key Differences from Treating View | 
 
 3. For each IME, provide a detailed section with:
    A. Examination Context: Purpose, scope, and materials reviewed
@@ -1003,7 +1003,7 @@ YOUR MOST CRITICAL INSTRUCTION - EVERYTHING MUST HAVE CITATIONS TO THE DOCUMENTS
 FORMAT YOUR RESPONSE AS FOLLOWS:
 1. 1. Begin with an executive summary (Do not write the title 'Executive summary', just do dot points)  of the overall treatment approval pattern and current status.
 2. Create a chronological table with these exact columns:
-   | Date Requested | Treatment | Requesting Provider | Specialty | Decision Date | Decision | Reason Given | Impact on Recovery | Citation |
+   | Date Requested | Treatment | Requesting Provider | Specialty | Decision Date | Decision | Reason Given | Impact on Recovery | 
 
 3. After the comprehensive table, organize treatments into categories:
    A. Approved Treatments
@@ -1046,7 +1046,7 @@ YOUR MOST CRITICAL INSTRUCTION - EVERYTHING MUST HAVE CITATIONS TO THE DOCUMENTS
 FORMAT YOUR RESPONSE AS FOLLOWS:
 1. Begin with a statement about whether surveillance evidence is mentioned in the records.
 2. If surveillance is referenced, create a table with these exact columns:
-   | Date of Reference | Provider | Specialty | Surveillance Type/Date | Activities Observed | Provider's Interpretation | Impact on Opinion | Citation |
+   | Date of Reference | Provider | Specialty | Surveillance Type/Date | Activities Observed | Provider's Interpretation | Impact on Opinion | 
 
 3. If surveillance is referenced, provide:
    A. Analysis of how providers incorporated surveillance findings into their assessment
@@ -1087,7 +1087,7 @@ This surveillance reference analysis is relevant to credibility assessment in bo
 FORMAT YOUR RESPONSE AS FOLLOWS:
 1. 1. Begin with an executive summary (Do not write the title 'Executive summary', just do dot points)  of the immediate post-accident presentation and documentation sources.
 2. Create a detailed chronological table with these exact columns:
-   | Timepoint | Source Type | Provider | Specialty | Provider/Witness | Documented Symptoms | Physical Findings | Treatment Provided | Citation |
+   | Timepoint | Source Type | Provider | Specialty | Provider/Witness | Documented Symptoms | Physical Findings | Treatment Provided | 
 
 3. Organize the immediate post-accident period into these specific timeframes:
    A. At Scene / Ambulance (if applicable)
@@ -1131,7 +1131,7 @@ YOUR MOST CRITICAL INSTRUCTION - EVERYTHING MUST HAVE CITATIONS TO THE DOCUMENTS
 FORMAT YOUR RESPONSE AS FOLLOWS:
 1. 1. Begin with an executive summary (Do not write the title 'Executive summary', just do dot points)  of the WAD diagnosis pattern and current status.
 2. Create a chronological table with these exact columns:
-   | Date | Provider | Specialty | WAD Grade (0-IV) | Diagnostic Criteria Referenced | Key Symptoms/Findings | Prognosis | Citation |
+   | Date | Provider | Specialty | WAD Grade (0-IV) | Diagnostic Criteria Referenced | Key Symptoms/Findings | Prognosis | 
 
 3. After the comprehensive table, provide:
    A. Analysis of any changes in WAD grading over time
@@ -1172,7 +1172,7 @@ YOUR MOST CRITICAL INSTRUCTION - EVERYTHING MUST HAVE CITATIONS TO THE DOCUMENTS
 FORMAT YOUR RESPONSE AS FOLLOWS:
 1. Begin with an executive summary (no header , just dot points) of all third-party insurer assessments and their general alignment.
 2. Create a detailed table with these exact columns:
-   | Date | Examiner | Specialty | Requesting Insurer | Diagnosis | Causation Determination | Impairment Assessment | Treatment Recommendations | Return to Normal | Citation |
+   | Date | Examiner | Specialty | Requesting Insurer | Diagnosis | Causation Determination | Impairment Assessment | Treatment Recommendations | Return to Normal | 
 
 3. For each third-party assessment, provide a detailed section with:
    A. Examination Context: Timing, scope, and materials reviewed
