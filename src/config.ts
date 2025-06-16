@@ -36,21 +36,14 @@ const envSchemaBase = z.object({
     val ? val.split(',').map(origin => origin.trim()) : undefined
   ),
   
-  // Azure Search - Optional in development
-  AZURE_SEARCH_ENDPOINT: isDevelopment ? z.string().optional() : z.string(),
-  AZURE_SEARCH_INDEX: isDevelopment ? z.string().optional() : z.string(),
-  AZURE_SEARCH_KEY: isDevelopment ? z.string().optional() : z.string(),
-  
   // Azure OpenAI - Optional in development
   AZURE_OPENAI_KEY: isDevelopment ? z.string().optional() : z.string(),
   AZURE_OPENAI_ENDPOINT: isDevelopment ? z.string().optional() : z.string(),
   AZURE_OPENAI_DEPLOYMENT: isDevelopment ? z.string().optional() : z.string(),
-  AZURE_OPENAI_RESOURCE: isDevelopment ? z.string().optional() : z.string(),
   
   // Azure Document Intelligence - Optional in development
   AZURE_DOCUMENT_KEY: isDevelopment ? z.string().optional() : z.string(),
   AZURE_DOCUMENT_ENDPOINT: isDevelopment ? z.string().optional() : z.string(),
-  SHOW_TEST_HARNESS: z.boolean().default(false),
 
   // Conditionally required Azure Storage Connection String
   AZURE_STORAGE_CONNECTION_STRING: z.string().optional(),
@@ -136,23 +129,11 @@ const env = {
 
 const config: Config = {
   azure: {
-    search: {
-      endpoint: env.AZURE_SEARCH_ENDPOINT || '',
-      indexName: env.AZURE_SEARCH_INDEX || '',
-      apiKey: env.AZURE_SEARCH_KEY || ''
-    },
     azureOpenAI: {
       key: env.AZURE_OPENAI_KEY || '',
       endpoint: env.AZURE_OPENAI_ENDPOINT || '',
-      deployment: env.AZURE_OPENAI_DEPLOYMENT || '',
-      resource: env.AZURE_OPENAI_RESOURCE || ''
+      deployment: env.AZURE_OPENAI_DEPLOYMENT || ''
     },    
-    azureOpenAILogic: {
-      key: env.AZURE_OPENAI_KEY || '',
-      endpoint: env.AZURE_OPENAI_ENDPOINT || '',
-      deployment: env.AZURE_OPENAI_DEPLOYMENT || '',
-      resource: env.AZURE_OPENAI_RESOURCE || ''
-    },
     documentIntelligence: {
       key: env.AZURE_DOCUMENT_KEY || '',
       endpoint: env.AZURE_DOCUMENT_ENDPOINT || ''
@@ -201,17 +182,10 @@ const config: Config = {
 ////////////////////////////////////////////////////////////////
 
 // Type definitions
-interface AzureSearchConfig {
-  endpoint: string;
-  indexName: string;
-  apiKey: string;
-}
-
 interface AzureOpenAIConfig {
   key: string;
   endpoint: string;
   deployment: string;
-  resource: string;
 }
 
 interface AzureDocumentIntelligenceConfig {
@@ -220,9 +194,7 @@ interface AzureDocumentIntelligenceConfig {
 }
 
 interface AzureConfig {
-  search: AzureSearchConfig;
   azureOpenAI: AzureOpenAIConfig;
-  azureOpenAILogic: AzureOpenAIConfig;
   documentIntelligence: AzureDocumentIntelligenceConfig;
 }
 

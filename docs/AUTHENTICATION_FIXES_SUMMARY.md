@@ -85,3 +85,17 @@ The system now:
 - Maintains user context throughout async operations
 - Provides clear error messages for authentication failures
 - Follows the principle of "fail secure" - denying access when in doubt 
+
+
+# File Processing Configuration
+MAX_FILE_SIZE=15728640  # 15MB in bytes
+MAX_FILES=10
+ALLOWED_TYPES=application/pdf,image/jpeg,image/png
+TEMP_DIR=./temp
+OUTPUT_DIR=./output
+
+# Debug
+DEBUG=false 
+LOG_LEVEL=info
+LOG_FILTER=all
+LOG_PROCESSES=CASE_SUMMARY,LLM_ORCHESTRATION,TIMELINE,GEN_COMP_SUMMARY

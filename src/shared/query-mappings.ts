@@ -312,7 +312,7 @@ FORMAT YOUR RESPONSE AS FOLLOWS:
    C. Physical Examination Findings (ROM, strength, special tests, etc.)
 
 3. For each section, create a table with these exact columns:
-   | Date | Provider | Specialty | Test/Examination | Finding | Supports/Contradicts | 
+   | Date | Provider | Specialty | Finding | Supports/Contradicts | 
 
 SPECIFIC REQUIREMENTS:
 - Never make generic statements, only ones specific to this patients case. For instance the doctor reading this has substantial clinical knowledge to support their understanding and it is unhelpful to make basic statements about meaning which they easily know in their context..
@@ -321,7 +321,7 @@ SPECIFIC REQUIREMENTS:
 - For "Provider" column, include only the provider's name without their title
 - For "Specialty" column, include only their medical specialty, use shorthand where appropriate e.g. Ortho, Plastics, Psychology, Psychiatry, GP, Physio, Exercise Physiologist, Occupational Therapist (so shortened only where posisble while retaining clarity)
 - For "Citation" column, use the citation to the vector store, not document titles or filenames
-- "Finding" must contain the actual measured result or specific observation, quoted where possible
+- "Finding" must contain the actual measured result or specific observation, quoted where possible. It should state the name of the examination or test if known before the quote.
 - "Supports or Contradicts" must clearly state whether the finding is consistent with the claimed condition
 - Include ONLY objective findings, not subjective reports or symptoms
 - For imaging, distinguish between the radiologist's report and treating doctors' interpretations
