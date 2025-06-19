@@ -31,12 +31,12 @@ erDiagram
     
     candidates {
         int candidate_id PK
-        int user_id FK
+        int staff_id FK
         string silknotePatientUuid "New field added for integration"
     }
     
-    User {
-        int user_id PK
+    staff {
+        int staff_id PK
         string silknoteUserUuid "New field added for integration"
     }
     
@@ -65,9 +65,9 @@ erDiagram
     %% Relationships within the same database
     ax_notes_attachments ||--o{ assessments : "has"
     assessments ||--|| candidates : "belongs to"
-    candidates }o--|| User : "owned by"
+    candidates }o--|| staff : "owned by"
     candidates ||--o| silknote_patient_filesets : "linked via silknotePatientUuid"
-    User ||--o| silknote_patient_filesets : "linked via silknoteUserUuid"
+    staff ||--o| silknote_patient_filesets : "linked via silknoteUserUuid"
     silknote_patient_filesets ||--o{ silknote_documents : "contains"
     ax_notes_attachments ||--o| silknote_documents : "file_uuid matches VSRXReference"
 ```
@@ -136,8 +136,8 @@ flowchart TB
 - `candidates.silknotePatientUuid` → `silknote_patient_filesets.silknotePatientUuid`
 - Only patients with `silknote_patient_filesets.activatedUse = true` are synced
 
-### 2. User Linking
-- `User.silknoteUserUuid` → `silknote_patient_filesets.silknoteUserUuid`
+### 2. Staff Linking
+- `staff.silknoteUserUuid` → `silknote_patient_filesets.silknoteUserUuid`
 
 ### 3. File Reference
 - `ax_notes_attachments.file_uuid` → `silknote_documents.VSRXReference`

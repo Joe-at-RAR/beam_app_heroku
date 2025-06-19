@@ -198,13 +198,6 @@ export function createLocalDatabaseAdapter(): DatabaseAdapter {
       return userPatients[silknotePatientUuid] || null;
     },
 
-    async getAllPatients(silknoteUserUuid: string): Promise<PatientDetails[]> {
-      if (!isInitialized) throw new Error('Adapter not initialized');
-      logger.info(`[LOCAL_DB] getAllPatients for user ${silknoteUserUuid}`);
-      const userPatients = getUserPatientsCollection(silknoteUserUuid);
-      return Object.values(userPatients);
-    },
-
     async updatePatient(silknoteUserUuid: string, silknotePatientUuid: string, patientUpdates: Partial<PatientDetails>): Promise<boolean> {
       if (!isInitialized) throw new Error('Adapter not initialized');
       logger.info(`[LOCAL_DB] updatePatient for user ${silknoteUserUuid}, patient ${silknotePatientUuid}`);

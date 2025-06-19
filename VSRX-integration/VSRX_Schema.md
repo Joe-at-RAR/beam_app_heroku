@@ -2,12 +2,12 @@
 
 ## Complete Database Schema with Silknote Integration
 
-### Table: `User`
+### Table: `staff`
 ```
-User {
-  user_id - primary identifier
+staff {
+  staff_id - primary identifier  
   silknoteUserUuid - STRING, UNIQUE, UUID format
-  // Other user fields (not specified in conversation)
+  // Other staff fields (not specified in conversation)
 }
 ```
 
@@ -15,7 +15,7 @@ User {
 ```
 candidates {
   candidate_id - primary identifier (patient identifier)
-  user_id - FK references User.user_id
+  staff_id - FK references staff.staff_id
   silknotePatientUuid - STRING, UUID format
   // Other patient information fields (not specified in conversation)
 }
@@ -47,7 +47,7 @@ ax_notes_attachments {
 ```
 silknote_patient_filesets {
   silknotePatientUuid - STRING, PRIMARY KEY, UNIQUE, UUID
-  silknoteUserUuid - STRING, FK references User.silknoteUserUuid
+  silknoteUserUuid - STRING
   activatedUse - BOOLEAN, DEFAULT false
   activatedUseTime - DATETIME, NULL
   patientName - STRING, NULL
@@ -68,7 +68,7 @@ silknote_documents {
   silknoteDocumentUuid - STRING, PRIMARY KEY, UNIQUE, UUID
   patientUuid - STRING, FK references silknote_patient_filesets.silknotePatientUuid (CASCADE DELETE)
   originalName - STRING, NOT NULL
-  VSRXReference - STRING, NULL (stores VSRX file_uuid for synced documents)
+  clientFileId - STRING, NULL
   storedPath - STRING, NULL
   status - STRING, NOT NULL
   category - STRING, NOT NULL (encrypted)
@@ -85,15 +85,16 @@ silknote_documents {
   alertsJson - TEXT, NULL (encrypted)
   createdAt - DATETIME, DEFAULT now()
   updatedAt - DATETIME, auto-update
+  VSRXReference - STRING, NULL (stores VSRX file_uuid for synced documents)
 }
 ```
 
 ## Key Relationships
 
-- `User.silknoteUserUuid` → `silknote_patient_filesets.silknoteUserUuid`
-- `User.user_id` → `candidates.user_id`
-- `candidates.candidate_id` → `assessments.candidate_id`
-- `silknote_patient_filesets.silknotePatientUuid` → `silknote_documents.patientUuid`
+- `staff.silknoteUserUuid` → `silknote_patient_filesets.silknoteUserUuid` (logical relationship, NO FK constraint)
+- `staff.staff_id` → `candidates.staff_id` (FK constraint)
+- `candidates.candidate_id` → `assessments.candidate_id` (FK constraint)
+- `silknote_patient_filesets.silknotePatientUuid` → `silknote_documents.patientUuid` (FK constraint with CASCADE DELETE)
 - Files in `ax_notes_attachments` are primarily associated with assessments
 - Each assessment is exclusively associated to one patient ID
 - If patient is rebooked, new patient ID is generated in backend

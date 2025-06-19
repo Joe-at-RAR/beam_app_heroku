@@ -29,7 +29,6 @@ function logError(message: string, error?: Error | any, context?: any): void {
 }
 
 export type StorageType = 'LOCAL' | 'POSTGRES_PRISMA' | 'MYSQL';
-export type FileStorageType = 'LOCAL' | 'BLOB';
 
 export type OperatingMode = 'LOCAL' | 'VSRX' | 'SILKNOTE';
 
@@ -37,12 +36,9 @@ export type OperatingMode = 'LOCAL' | 'VSRX' | 'SILKNOTE';
 export class StorageService {
   private tempDir: string;
   private outputDir: string;
-  private databaseType: StorageType;
-  private fileStorageType: FileStorageType;
   private initialized: boolean = false;
   private allowedBasePaths: string[] = []; // Store allowed paths for VSRX
   private operatingMode: OperatingMode;
-  private isVsrx: boolean;
 
   public fileAdapter: FileStorageAdapter; // Make public for direct access if needed
   public dbAdapter: DatabaseAdapter; // Make public for direct access if needed
@@ -50,16 +46,13 @@ export class StorageService {
   constructor() {
     this.tempDir = config.processing.tempDir;
     this.outputDir = config.processing.outputDir;
-    this.databaseType = (process.env['DATABASE_TYPE'] as StorageType) || 'LOCAL';
-    this.fileStorageType = (process.env['FILE_STORAGE_TYPE'] as FileStorageType) || 'LOCAL';
     this.operatingMode = (process.env['OPERATING_MODE'] as OperatingMode) || 'LOCAL';
-    this.isVsrx = process.env['VSRX_MODE'] === 'true';
 
     // Load and normalize allowed paths for VSRX
-    if (process.env['VSRX_MODE'] === 'true') {
+    if (this.operatingMode === 'VSRX') {
       const pathsEnv = process.env['ALLOWED_FILE_BASE_PATHS'];
       if (!pathsEnv) {
-        logError('VSRX_MODE is true, but ALLOWED_FILE_BASE_PATHS environment variable is not set. File access will fail.');
+        logError('OPERATING_MODE is VSRX, but ALLOWED_FILE_BASE_PATHS environment variable is not set. File access will fail.');
       } else {
         this.allowedBasePaths = pathsEnv.split(';') // Use semicolon as separator
           .map(p => p.trim())
@@ -81,9 +74,9 @@ export class StorageService {
         this.fileAdapter = createAzureBlobFileAdapter();
         break;
       case 'VSRX':
-        logInfo('Using MySQL DB Adapter and Local File Adapter (for VSRX path handling)');
+        logInfo('Using MySQL DB Adapter and Azure Blob File Adapter (for VSRX with blob storage)');
         this.dbAdapter = createMySqlDatabaseAdapter();
-        this.fileAdapter = createLocalFileAdapter();
+        this.fileAdapter = createAzureBlobFileAdapter();
         break;
       case 'LOCAL':
       default:
@@ -96,9 +89,7 @@ export class StorageService {
     logInfo('StorageService constructed', {
       tempDir: this.tempDir,
       outputDir: this.outputDir,
-      databaseType: this.databaseType,
-      fileStorageType: this.fileStorageType,
-      vsrxMode: process.env['VSRX_MODE'] === 'true'
+      operatingMode: this.operatingMode,
     });
   }
 
@@ -113,7 +104,7 @@ export class StorageService {
 
     try {
       // Initialize file adapter (relevant even in VSRX for temp dir handling)
-      logInfo(`Initializing ${this.fileStorageType} file storage related components (temp dir etc)`);
+      logInfo(`Initializing ${this.operatingMode} file storage related components (temp dir etc)`);
       // Use tempDir for file adapter init, outputDir might be irrelevant for blob/vsrx
       const fileResult = await this.fileAdapter.initialize(this.tempDir);
       if (!fileResult.success) {
@@ -121,7 +112,7 @@ export class StorageService {
       }
 
       // Initialize database adapter
-      logInfo(`Initializing ${this.databaseType} database`);
+      logInfo(`Initializing ${this.operatingMode} database`);
       const dbResult = await this.dbAdapter.initialize();
       if (!dbResult.success) {
         errors.push(...dbResult.errors);
@@ -149,7 +140,7 @@ export class StorageService {
 
   // --- Path Validation Function (VSRX specific) ---
   private async isValidVSRXPath(filePath: string): Promise<boolean> {
-    if (process.env['VSRX_MODE'] !== 'true') {
+    if (this.operatingMode !== 'VSRX') {
       return true; // Validation only applies in VSRX mode
     }
     if (this.allowedBasePaths.length === 0) {
@@ -203,7 +194,7 @@ export class StorageService {
     
     if (!this.initialized) throw new Error('Storage service not initialized');
     
-    if (process.env['VSRX_MODE'] === 'true' && options.isVSRXPath) {
+    if (this.operatingMode === 'VSRX' && options.isVSRXPath) {
       // **VSRX PATH VALIDATION**
       const isValid = await this.isValidVSRXPath(fileRef);
       if (!isValid) {
@@ -244,7 +235,7 @@ export class StorageService {
 
   // No file storage in VSRX mode
   async storeFile(fileBuffer: Buffer, filename: string): Promise<string> {
-    if (process.env['VSRX_MODE'] === 'true') {
+    if (this.operatingMode === 'VSRX') {
       logInfo("VSRX Mode: storeFile called, but file storage is managed externally. Returning filename.");
       return filename;
     }
@@ -255,7 +246,7 @@ export class StorageService {
   // Only deletes DB reference in VSRX mode (handled by deleteDocument)
   async deleteFile(fileRef: string, options: { isVSRXPath?: boolean } = {}): Promise<boolean> {
     if (!this.initialized) throw new Error('Storage service not initialized');
-    if (process.env['VSRX_MODE'] === 'true' && options.isVSRXPath) {
+    if (this.operatingMode === 'VSRX' && options.isVSRXPath) {
       logError("VSRX Mode: deleteFile should not be called directly for VSRX paths. Use deleteDocument.", new Error("Incorrect function call for VSRX"));
       return false; // Indicate failure or inappropriate call
     }
@@ -264,7 +255,7 @@ export class StorageService {
 
   // Finalize upload not applicable in VSRX mode
   async finalizeUploadedFile(tempPath: string, clientFileId: string): Promise<string> {
-    if (process.env['VSRX_MODE'] === 'true') {
+    if (this.operatingMode === 'VSRX') {
       logError("VSRX Mode: finalizeUploadedFile called inappropriately.", new Error("Incorrect function call for VSRX"));
       throw new Error("finalizeUploadedFile is not applicable in VSRX mode.");
     }
@@ -274,7 +265,7 @@ export class StorageService {
 
   // PDF upload middleware not applicable in VSRX mode for adding docs
   createPdfUploadMiddleware(): RequestHandler {
-    if (process.env['VSRX_MODE'] === 'true') {
+    if (this.operatingMode === 'VSRX') {
       logError("VSRX Mode: createPdfUploadMiddleware called inappropriately.", new Error("Incorrect function call for VSRX"));
       return (_req, res, _next) => {
         res.status(405).json({ error: 'File uploads not supported in VSRX mode via this endpoint.' });
@@ -286,7 +277,7 @@ export class StorageService {
   async getPdfPageCount(filePath: string): Promise<number> {
     if (!this.initialized) throw new Error('Storage service not initialized');
     // In VSRX mode, filePath will be the absolute path from the DB
-    if (this.isVsrx) { // Use internal flag
+    if (this.operatingMode === 'VSRX') {
       logInfo(`VSRX: Getting page count for path ${filePath}`);
       const isValid = await this.isValidVSRXPath(filePath);
       if (!isValid) {
@@ -316,7 +307,7 @@ export class StorageService {
 
   // --- VSRX Specific Document Addition ---
   async addDocumentReference(silknoteUserUuid: string, patientUUID: string, filePath: string, originalName: string, uploadDate?: Date, optionalMetadata: Partial<MedicalDocument> = {}): Promise<{ success: boolean; documentId?: string; error?: string }> {
-    if (process.env['VSRX_MODE'] !== 'true') {
+    if (this.operatingMode !== 'VSRX') {
       return { success: false, error: "System not configured for VSRX mode." };
     }
     if (!this.initialized) {
@@ -360,10 +351,10 @@ export class StorageService {
       ...optionalMetadata
     };
 
-    // 3. Add to Database via Adapter (which MUST be MySQL in VSRX)
-    if (this.databaseType !== 'MYSQL') {
-      logError('VSRX mode requires DATABASE_TYPE=MYSQL, but it is set to ', this.databaseType);
-      return { success: false, error: 'Invalid database configuration for VSRX mode.' };
+    // 3. Add to Database via Adapter (which MUST use MySQL DB adapter in VSRX)
+    if (this.operatingMode !== 'VSRX') {
+      logError('addDocumentReference requires OPERATING_MODE=VSRX, but it is set to ', this.operatingMode);
+      return { success: false, error: 'Invalid operating mode for VSRX document reference.' };
     }
     const saved = await this.dbAdapter.addDocumentToPatient(silknoteUserUuid, patientUUID, documentData);
 
@@ -490,10 +481,7 @@ export class StorageService {
     if (!this.initialized) throw new Error('Storage service not initialized');
     return this.dbAdapter.getPatient(silknoteUserUuid, silknotePatientUuid);
   }
-  async getAllPatients(silknoteUserUuid: string): Promise<any[]> {
-    if (!this.initialized) throw new Error('Storage service not initialized');
-    return this.dbAdapter.getAllPatients(silknoteUserUuid);
-  }
+
   async updatePatient(silknoteUserUuid: string, silknotePatientUuid: string, patient: any): Promise<boolean> {
     if (!this.initialized) throw new Error('Storage service not initialized');
     return this.dbAdapter.updatePatient(silknoteUserUuid, silknotePatientUuid, patient);
@@ -506,7 +494,7 @@ export class StorageService {
   async addDocumentToPatient(silknoteUserUuid: string, silknotePatientUuid: string, document: MedicalDocument): Promise<boolean> {
     // This specific method might be less relevant if using addDocumentReference directly
     // If used, ensure it sets status correctly for VSRX
-    if (process.env['VSRX_MODE'] === 'true') {
+    if (this.operatingMode === 'VSRX') {
       logError("VSRX Mode: Use addDocumentReference instead of addDocumentToPatient.", new Error("Incorrect function call for VSRX"));
       return false;
     }

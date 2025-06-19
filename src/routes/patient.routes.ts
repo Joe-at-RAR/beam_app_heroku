@@ -82,33 +82,33 @@ async function quickStore(
 router.options('/:silknotePatientUuid/process', cors());
 
 // GET / - fetch all patients
-router.get('/', async (req, res) => {
-  try {
-    const { silknoteUserUuid } = req.query
-    console.log('Fetching patients with silknoteUserUuid:', silknoteUserUuid)
+// router.get('/', async (req, res) => {
+//   try {
+//     const { silknoteUserUuid } = req.query
+//     console.log('Fetching patients with silknoteUserUuid:', silknoteUserUuid)
     
-    let patients;
-    if (silknoteUserUuid && typeof silknoteUserUuid === 'string') {
-      // Use the dedicated service function when silknoteUserUuid is provided
-      patients = await patientService.getPatientsByUserId(silknoteUserUuid);
-      console.log(`Found ${patients.length} patients for silknoteUserUuid: ${silknoteUserUuid}`);
-    } else {
-      // Get silknoteUserUuid from headers when no query param is provided
-      const headerUserUuid = req.headers['x-silknote-user-uuid'] as string || req.headers['silknote-user-uuid'] as string;
-      if (headerUserUuid) {
-        patients = await patientService.getPatients(headerUserUuid);
-        console.log(`Found ${patients.length} patients from header silknoteUserUuid: ${headerUserUuid}`);
-      } else {
-        return res.status(400).json({ error: 'Missing silknote-user-uuid in query parameter or headers' });
-      }
-    }
+//     let patients;
+//     if (silknoteUserUuid && typeof silknoteUserUuid === 'string') {
+//       // Use the dedicated service function when silknoteUserUuid is provided
+//       patients = await patientService.getPatientsByUserId(silknoteUserUuid);
+//       console.log(`Found ${patients.length} patients for silknoteUserUuid: ${silknoteUserUuid}`);
+//     } else {
+//       // Get silknoteUserUuid from headers when no query param is provided
+//       const headerUserUuid = req.headers['x-silknote-user-uuid'] as string || req.headers['silknote-user-uuid'] as string;
+//       if (headerUserUuid) {
+//         patients = await patientService.getPatients(headerUserUuid);
+//         console.log(`Found ${patients.length} patients from header silknoteUserUuid: ${headerUserUuid}`);
+//       } else {
+//         return res.status(400).json({ error: 'Missing silknote-user-uuid in query parameter or headers' });
+//       }
+//     }
     
-    return res.json({ patients });
-  } catch (error) {
-    console.error('Error fetching patients:', error)
-    return res.status(500).json({ error: 'Error fetching patients' })
-  }
-})
+//     return res.json({ patients });
+//   } catch (error) {
+//     console.error('Error fetching patients:', error)
+//     return res.status(500).json({ error: 'Error fetching patients' })
+//   }
+// })
 
 // GET /:silknotePatientUuid - fetch a single patient's details
 router.get('/:silknotePatientUuid', async (req, res) => {
@@ -383,51 +383,51 @@ router.post(
 );
 
 // POST / - create a new patient
-router.post('/', async (req, res) => {
-  try {
-    const { silknotePatientUuid, name, dateOfBirth, silknoteUserUuid } = req.body
+// router.post('/', async (req, res) => {
+//   try {
+//     const { silknotePatientUuid, name, dateOfBirth, silknoteUserUuid } = req.body
     
-    // Validate all required fields
-    if (!silknotePatientUuid || !name || !dateOfBirth) {
-      return res.status(400).json({
-        error: 'Missing required fields',
-        details: {
-          silknotePatientUuid: silknotePatientUuid ? undefined : 'Required',
-          name: name ? undefined : 'Required',
-          dateOfBirth: dateOfBirth ? undefined : 'Required'
-        }
-      })
-    }
+//     // Validate all required fields
+//     if (!silknotePatientUuid || !name || !dateOfBirth) {
+//       return res.status(400).json({
+//         error: 'Missing required fields',
+//         details: {
+//           silknotePatientUuid: silknotePatientUuid ? undefined : 'Required',
+//           name: name ? undefined : 'Required',
+//           dateOfBirth: dateOfBirth ? undefined : 'Required'
+//         }
+//       })
+//     }
     
-    // Validate silknoteUserUuid specifically
-    if (!silknoteUserUuid) {
-      return res.status(400).json({
-        error: 'Missing required field: silknoteUserUuid',
-        details: {
-          silknoteUserUuid: 'Required - this associates the patient with a user'
-        }
-      })
-    }
+//     // Validate silknoteUserUuid specifically
+//     if (!silknoteUserUuid) {
+//       return res.status(400).json({
+//         error: 'Missing required field: silknoteUserUuid',
+//         details: {
+//           silknoteUserUuid: 'Required - this associates the patient with a user'
+//         }
+//       })
+//     }
     
-    const patientData: PatientDetails = {
-      silknotePatientUuid, // Use silknotePatientUuid directly from request
-      name,
-      dateOfBirth,
-      silknoteUserUuid,
-      fileSet: [],
-      gender: req.body.gender || 'unknown',
-      vectorStore: null,
-      caseSummary: null
-    }
+//     const patientData: PatientDetails = {
+//       silknotePatientUuid, // Use silknotePatientUuid directly from request
+//       name,
+//       dateOfBirth,
+//       silknoteUserUuid,
+//       fileSet: [],
+//       gender: req.body.gender || 'unknown',
+//       vectorStore: null,
+//       caseSummary: null
+//     }
     
-    console.log(`Creating patient with silknotePatientUuid: ${silknotePatientUuid}, silknoteUserUuid: ${silknoteUserUuid}`);
-    const newPatient = await patientService.createPatient(patientData)
-    return res.status(200).json({ patient: newPatient })
-  } catch (error) {
-    console.error('Error creating patient:', error)
-    return res.status(500).json({ error: 'Error creating patient' })
-  }
-})
+//     console.log(`Creating patient with silknotePatientUuid: ${silknotePatientUuid}, silknoteUserUuid: ${silknoteUserUuid}`);
+//     const newPatient = await patientService.createPatient(patientData)
+//     return res.status(200).json({ patient: newPatient })
+//   } catch (error) {
+//     console.error('Error creating patient:', error)
+//     return res.status(500).json({ error: 'Error creating patient' })
+//   }
+// })
 
 // DELETE /patients/:silknotePatientUuid - delete a patient and their files
 router.delete('/:silknotePatientUuid', async (req, res) => {
@@ -663,15 +663,15 @@ router.delete('/:patientId/case-summary', asyncHandler(async (req: Request, res:
 // POST /:silknotePatientUuid/activate - Set activatedUse status for a patient
 router.post('/:silknotePatientUuid/activate', async (req: Request, res: Response) => {
   const { silknotePatientUuid } = req.params
-  const { activatedUse, 'user-key': userKey } = req.body
+  const { activatedUse, 'patient-key': patientKey } = req.body
   
   // Validate request body
-  if (typeof activatedUse !== 'boolean' || !userKey) {
+  if (typeof activatedUse !== 'boolean' || !patientKey) {
     return res.status(400).json({ 
       error: 'Invalid request body',
       details: {
         activatedUse: typeof activatedUse !== 'boolean' ? 'Must be a boolean' : undefined,
-        'user-key': !userKey ? 'Required' : undefined
+        'patient-key': !patientKey ? 'Required' : undefined
       }
     })
   }
@@ -683,10 +683,10 @@ router.post('/:silknotePatientUuid/activate', async (req: Request, res: Response
   // Expected format: sha256(`${silknoteUserUuid}{${silknoteUserUuid}}`)
   const expectedKey = crypto
     .createHash('sha256')
-    .update(`${silknoteUserUuid}{${silknoteUserUuid}}`)
+    .update(`${silknotePatientUuid}{${silknotePatientUuid}}`)
     .digest('hex');
   
-  if (userKey !== expectedKey) {
+  if (patientKey !== expectedKey) {
     logger.warn(`Invalid user-key provided for patient ${silknotePatientUuid} by user ${silknoteUserUuid}`);
     return res.status(403).json({ error: 'Invalid user-key' });
   }

@@ -48,10 +48,14 @@ const envSchemaBase = z.object({
   // Conditionally required Azure Storage Connection String
   AZURE_STORAGE_CONNECTION_STRING: z.string().optional(),
   AZURE_STORAGE_CONTAINER_NAME: z.string().default('documents'),
+  
+  // VSRX-specific database connection string (required only when OPERATING_MODE is VSRX)
+  VSRX_MYSQL_CONNECTION_STRING: z.string().optional(),
 });
 
 // Refine schema based on OPERATING_MODE
 const envSchema = envSchemaBase.superRefine((data, ctx) => {
+  // SILKNOTE mode requires Azure Blob storage
   if (data.OPERATING_MODE === 'SILKNOTE' && !data.AZURE_STORAGE_CONNECTION_STRING) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -59,6 +63,25 @@ const envSchema = envSchemaBase.superRefine((data, ctx) => {
       path: ['AZURE_STORAGE_CONNECTION_STRING'],
     });
   }
+
+  // VSRX mode requires Azure Blob storage and MySQL connection
+  if (data.OPERATING_MODE === 'VSRX') {
+    if (!data.AZURE_STORAGE_CONNECTION_STRING) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'AZURE_STORAGE_CONNECTION_STRING is required when OPERATING_MODE is VSRX',
+        path: ['AZURE_STORAGE_CONNECTION_STRING'],
+      });
+    }
+    if (!data.VSRX_MYSQL_CONNECTION_STRING) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'VSRX_MYSQL_CONNECTION_STRING is required when OPERATING_MODE is VSRX',
+        path: ['VSRX_MYSQL_CONNECTION_STRING'],
+      });
+    }
+  }
+
   // If SILKNOTE mode implies Postgres, ensure STORAGE_TYPE reflects that.
   // This example assumes SILKNOTE uses POSTGRES_PRISMA. Adjust if different.
   if (data.OPERATING_MODE === 'SILKNOTE') {

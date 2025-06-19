@@ -48,7 +48,6 @@ export interface DatabaseAdapter {
   // 'patientDetails' includes the silknotePatientUuid for save/update.
   savePatient(silknoteUserUuid: string, patientDetails: PatientDetails): Promise<boolean>; // userUuid is the owner
   getPatient(silknoteUserUuid: string, silknotePatientUuid: string): Promise<PatientDetails | null>;
-  getAllPatients(silknoteUserUuid: string): Promise<PatientDetails[]>; // Get all patients for a specific user
   updatePatient(silknoteUserUuid: string, silknotePatientUuid: string, patientUpdates: Partial<PatientDetails>): Promise<boolean>;
   deletePatient(silknoteUserUuid: string, silknotePatientUuid: string): Promise<boolean>;
   clearPatientCaseSummary(silknoteUserUuid: string, silknotePatientUuid: string): Promise<boolean>;

@@ -12,58 +12,6 @@ import { createLogger } from '../utils/logger'; // Import logger
 
 const logger = createLogger('PATIENT_SERVICE'); // Create logger instance
 
-// Remove file system dependencies for patients.json
-// import fs from 'fs/promises';
-// import path from 'path';
-// import { fileURLToPath } from 'url';
-// import { dirname } from 'path';
-
-// NOTE FOR CURSOR: Path configuration for JSON is removed
-// const __filename = fileURLToPath(import.meta.url);
-// const __dirname = dirname(__filename);
-// const dataDir = path.resolve(__dirname, '..', '..', 'data');
-// const patientsFilePath = path.join(dataDir, 'patients.json');
-
-// Remove in-memory data store
-// let patients: { [key: string]: PatientDetails } = {};
-
-// Remove initializePatientsStore and persistPatients functions
-// export async function initializePatientsStore() { ... }
-// async function persistPatients() { ... }
-
-// --- Refactored Functions using storageService.dbAdapter ---
-
-export async function getPatients(silknoteUserUuid: string): Promise<PatientDetails[]> {
-  console.log('[PATIENT SERVICE DB] Getting all patients');
-  try {
-    if (!storageService.isInitialized()) throw new Error('Storage service not initialized');
-    if (!silknoteUserUuid) throw new Error('silknoteUserUuid is required');
-    return await storageService.dbAdapter.getAllPatients(silknoteUserUuid);
-  } catch (error) {
-    console.error('[PATIENT SERVICE DB] Error getting all patients:', error);
-    return []; // Return empty array on error
-  }
-}
-
-/**
- * Get patients filtered by silknoteUserUuid
- * @param silknoteUserUuid The user ID to filter by
- * @returns Array of patients belonging to the specified user
- */
-export async function getPatientsByUserId(silknoteUserUuid: string): Promise<PatientDetails[]> {
-  console.log(`[PATIENT SERVICE DB] Getting patients for user ID: ${silknoteUserUuid}`);
-  if (!silknoteUserUuid) {
-    return [];
-  }
-  try {
-    if (!storageService.isInitialized()) throw new Error('Storage service not initialized');
-    return await storageService.dbAdapter.getAllPatients(silknoteUserUuid);
-  } catch (error) {
-    console.error(`[PATIENT SERVICE DB] Error getting patients for user ${silknoteUserUuid}:`, error);
-    return [];
-  }
-}
-
 export async function getPatientById(silknotePatientUuid: string, silknoteUserUuid?: string): Promise<PatientDetails | null> {
   logger.info(`Getting patient by ID: ${silknotePatientUuid}, User UUID: ${silknoteUserUuid}`);
   console.log(`[DEBUG] getPatientById called with:`, {
@@ -128,48 +76,48 @@ export async function getPatientById(silknotePatientUuid: string, silknoteUserUu
   }
 }
 
-export async function createPatient(patientInput: Partial<PatientDetails>): Promise<PatientDetails> {
-  console.log('[PATIENT SERVICE DB] Creating patient:', patientInput.name);
-  if (!patientInput.silknotePatientUuid) {
-    patientInput.silknotePatientUuid = uuidv4(); // Generate ID if not provided
-    console.log(`[PATIENT SERVICE DB] Generated new patient ID: ${patientInput.silknotePatientUuid}`);
-  }
+// export async function createPatient(patientInput: Partial<PatientDetails>): Promise<PatientDetails> {
+//   console.log('[PATIENT SERVICE DB] Creating patient:', patientInput.name);
+//   if (!patientInput.silknotePatientUuid) {
+//     patientInput.silknotePatientUuid = uuidv4(); // Generate ID if not provided
+//     console.log(`[PATIENT SERVICE DB] Generated new patient ID: ${patientInput.silknotePatientUuid}`);
+//   }
 
-  if (!patientInput.silknoteUserUuid) {
-    throw new Error('silknoteUserUuid is required for creating a patient');
-  }
+//   if (!patientInput.silknoteUserUuid) {
+//     throw new Error('silknoteUserUuid is required for creating a patient');
+//   }
 
-  // Ensure essential fields have defaults if not provided
-  const patientData: PatientDetails = {
-    silknotePatientUuid: patientInput.silknotePatientUuid,
-    name: patientInput.name || 'Unknown Patient',
-    dateOfBirth: patientInput.dateOfBirth || new Date().toISOString().split('T')[0], // Default DOB if missing
-    gender: patientInput.gender || 'unknown',
-    silknoteUserUuid: patientInput.silknoteUserUuid,
-    fileSet: patientInput.fileSet || [],
-    vectorStore: patientInput.vectorStore ?? null,
-    caseSummary: patientInput.caseSummary ?? null,
-    summaryGenerationCount: patientInput.summaryGenerationCount || 0,
-  };
+//   // Ensure essential fields have defaults if not provided
+//   const patientData: PatientDetails = {
+//     silknotePatientUuid: patientInput.silknotePatientUuid,
+//     name: patientInput.name || 'Unknown Patient',
+//     dateOfBirth: patientInput.dateOfBirth || new Date().toISOString().split('T')[0], // Default DOB if missing
+//     gender: patientInput.gender || 'unknown',
+//     silknoteUserUuid: patientInput.silknoteUserUuid,
+//     fileSet: patientInput.fileSet || [],
+//     vectorStore: patientInput.vectorStore ?? null,
+//     caseSummary: patientInput.caseSummary ?? null,
+//     summaryGenerationCount: patientInput.summaryGenerationCount || 0,
+//   };
 
-  try {
-    if (!storageService.isInitialized()) throw new Error('Storage service not initialized');
-    const success = await storageService.dbAdapter.savePatient(patientData.silknoteUserUuid, patientData);
-    if (!success) {
-      throw new Error('Failed to save patient to database');
-    }
-    // Refetch the patient to get the full object including potential DB defaults/timestamps
-    const newPatient = await storageService.dbAdapter.getPatient(patientData.silknoteUserUuid, patientData.silknotePatientUuid);
-    if (!newPatient) {
-       throw new Error('Failed to retrieve newly created patient');
-    }
-    console.log('[PATIENT SERVICE DB] Patient created successfully:', newPatient.silknotePatientUuid);
-    return newPatient;
-  } catch (error) {
-    console.error('[PATIENT SERVICE DB] Error creating patient:', error);
-    throw error; // Re-throw error
-  }
-}
+//   try {
+//     if (!storageService.isInitialized()) throw new Error('Storage service not initialized');
+//     const success = await storageService.dbAdapter.savePatient(patientData.silknoteUserUuid, patientData);
+//     if (!success) {
+//       throw new Error('Failed to save patient to database');
+//     }
+//     // Refetch the patient to get the full object including potential DB defaults/timestamps
+//     const newPatient = await storageService.dbAdapter.getPatient(patientData.silknoteUserUuid, patientData.silknotePatientUuid);
+//     if (!newPatient) {
+//        throw new Error('Failed to retrieve newly created patient');
+//     }
+//     console.log('[PATIENT SERVICE DB] Patient created successfully:', newPatient.silknotePatientUuid);
+//     return newPatient;
+//   } catch (error) {
+//     console.error('[PATIENT SERVICE DB] Error creating patient:', error);
+//     throw error; // Re-throw error
+//   }
+// }
 
 export async function updatePatient(patientUpdate: Partial<PatientDetails>): Promise<PatientDetails> {
   const silknotePatientUuid = patientUpdate.silknotePatientUuid; // Use silknotePatientUuid directly

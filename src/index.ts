@@ -127,7 +127,7 @@ app.use(express.json({
 ////////////////////////////////////////////////////////////////
 
 const rateLimiter = new RateLimiterMemory({
-  points: 10,    // Number of requests
+  points: 50,    // Number of requests
   duration: 1    // Per second
 });
 
