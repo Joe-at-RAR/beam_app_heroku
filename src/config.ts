@@ -176,7 +176,9 @@ const config: Config = {
   processing: {
     maxFileSize: 50 * 1024 * 1024, // 50MB
     maxFiles: 500, // Maximum 500 files per batch
-    allowedTypes: ['application/pdf'],
+    allowedTypes: env.OPERATING_MODE === 'VSRX' 
+      ? ['application/pdf'] // VSRX mode: PDF only
+      : ['application/pdf', 'image/jpeg', 'image/png'], // Other modes: PDF, JPEG, PNG
     // Use system temp directory in production (Azure-friendly), local path in development
     tempDir: isProduction ? os.tmpdir() : path.join(process.cwd(), 'server', 'temp'),
     // For Azure, use /home for persistent storage, local path in development  
